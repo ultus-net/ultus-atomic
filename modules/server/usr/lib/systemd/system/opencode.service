@@ -1,0 +1,39 @@
+[Unit]
+Description=OpenCode agent server (rootless)
+Documentation=https://opencode.ai/docs/server/
+Wants=network-online.target
+Requires=opencode-env.service ultus-network.service
+RequiresMountsFor=/var/srv
+After=opencode-env.service ultus-network.service user-runtime-dir@1000.service network-online.target
+Before=ultus-health.service
+
+[Service]
+Type=simple
+User=agents
+Environment=HOME=/var/lib/agents
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+# The image reference is a build-time default. The override file is the one
+# place a digest moves, and only root on the host can write it.
+Environment=OPENCODE_IMAGE=ghcr.io/ultus-net/devbox@sha256:8649976df3ebbd38f8b6b323b2a8522cb7de6021e969f836ed57c0cf4ab5e81a
+EnvironmentFile=/run/ultus/opencode.env
+EnvironmentFile=-/var/srv/ultus/workloads.env
+ExecStart=/usr/bin/podman run --rm --name opencode \
+  --userns=keep-id -u 1000 -e HOME=/home/dev \
+  --read-only \
+  --tmpfs /tmp:rw,mode=1777 --tmpfs /run:rw,mode=1777 \
+  --tmpfs /home/dev/.config:rw,mode=1777 --tmpfs /home/dev/.cache:rw,mode=1777 \
+  --cap-drop=all --security-opt no-new-privileges \
+  --network ultus \
+  -p 127.0.0.1:4096:4096 \
+  -v /var/srv/repos:/home/dev/repos:z \
+  -v /var/srv/opencode/share:/home/dev/.local/share/opencode:z \
+  -v /var/srv/opencode/config:/home/dev/.config/opencode:z \
+  -v /var/srv/opencode/state:/home/dev/.local/state/opencode:z \
+  ${OPENCODE_IMAGE} \
+  serve --service --hostname 0.0.0.0 --port 4096
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

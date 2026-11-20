@@ -1,0 +1,11 @@
+[Unit]
+Description=Adversarial fixture: every isolation failure in one unit
+
+[Service]
+User=root
+ExecStart=/usr/bin/podman run --privileged --network=host --pid=host --ipc=host \
+  --userns=host --cap-add=NET_ADMIN --security-opt label=disable \
+  -v /home:/host -v /root/.ssh:/ssh \
+  --mount=type=bind,source=/run/podman/podman.sock,destination=/var/run/docker.sock \
+  --device /dev/kvm -p 4096:4096 \
+  localhost/example:latest

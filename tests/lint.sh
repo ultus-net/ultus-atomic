@@ -53,6 +53,7 @@ bash_scripts=(
   modules/server/usr/libexec/ultus/ultus-data-prepare
   modules/server/usr/libexec/ultus/ultus-env
   tests/test-server-env.sh
+  tests/test-server-isolation.sh
 )
 posix_scripts=(
   modules/desktop/usr/libexec/ultus-atomic/needs-setup.sh

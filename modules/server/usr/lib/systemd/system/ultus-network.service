@@ -1,0 +1,16 @@
+[Unit]
+Description=Create the ultus Podman network
+RequiresMountsFor=/var/srv
+After=ultus-data-prepare.service user-runtime-dir@1000.service
+Wants=user-runtime-dir@1000.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=agents
+Environment=HOME=/var/lib/agents
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=/usr/bin/podman network create --ignore ultus
+
+[Install]
+WantedBy=multi-user.target

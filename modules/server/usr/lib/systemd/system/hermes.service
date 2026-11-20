@@ -1,0 +1,37 @@
+[Unit]
+Description=Hermes agent control plane (rootless)
+Wants=network-online.target
+Requires=hermes-env.service ultus-network.service
+RequiresMountsFor=/var/srv
+After=hermes-env.service opencode.service ultus-network.service user-runtime-dir@1000.service network-online.target
+Before=ultus-health.service
+
+[Service]
+Type=simple
+User=agents
+Environment=HOME=/var/lib/agents
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:41468459379a943cf0a25a55589e230d244bd9f95b83cff5eca789470c892fac
+Environment=HERMES_DASHBOARD=1
+Environment=API_SERVER_ENABLED=true
+Environment=API_SERVER_HOST=0.0.0.0
+Environment=PUID=1000
+Environment=PGID=1000
+EnvironmentFile=/run/ultus/hermes.env
+EnvironmentFile=-/var/srv/ultus/workloads.env
+ExecStart=/usr/bin/podman run --rm --name hermes \
+  --userns=keep-id -u 1000 \
+  --read-only \
+  --tmpfs /tmp:rw,mode=1777 --tmpfs /run:rw,mode=1777 \
+  --cap-drop=all --security-opt no-new-privileges \
+  --network ultus \
+  -p 127.0.0.1:8642:8642 \
+  -p 127.0.0.1:9119:9119 \
+  -v /var/srv/hermes/data:/opt/data:z \
+  ${HERMES_IMAGE} gateway run
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

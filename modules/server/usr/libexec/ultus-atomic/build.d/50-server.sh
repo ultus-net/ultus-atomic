@@ -36,13 +36,22 @@ install -d -m 0755 /var/lib/systemd/linger
 touch /var/lib/systemd/linger/agents
 chmod 0644 /var/lib/systemd/linger/agents
 
-systemctl enable ultus-data-prepare.service
-
-systemctl enable opencode-env.service hermes-env.service
-for unit in opencode-env.service hermes-env.service; do
+# Every unit this module ships is enabled here and asserted in the same pass. A
+# unit that is installed but not enabled never runs, and the failure stays silent
+# until the first boot needs it.
+units=(
+  ultus-data-prepare.service
+  opencode-env.service
+  hermes-env.service
+  ultus-network.service
+  opencode.service
+  hermes.service
+)
+systemctl enable "${units[@]}"
+for unit in "${units[@]}"; do
   enabled=$(systemctl is-enabled "$unit" || true)
   [[ $enabled == enabled ]] || {
-    echo "$unit is not enabled (got: ${enabled:-nothing}); the workload would start with no secrets" >&2
+    echo "$unit is not enabled (got: ${enabled:-nothing}); it would never run on the host" >&2
     exit 1
   }
 done

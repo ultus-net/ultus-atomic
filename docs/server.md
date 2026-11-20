@@ -58,6 +58,24 @@ journalctl -u opencode-env.service
 
 The workload unit requires its env unit, so a workload does not start with a partial environment.
 
+## Workloads
+
+| Unit | Sees | Publishes on loopback | Image default |
+| --- | --- | --- | --- |
+| `opencode.service` | `/var/srv/repos`, `/var/srv/opencode/{share,config,state}` | `4096` | `ghcr.io/ultus-net/devbox@sha256:8649976d…` |
+| `hermes.service` | `/var/srv/hermes/data` | `8642`, `9119` | `docker.io/nousresearch/hermes-agent@sha256:41468459…` |
+
+Both run as `agents` with `--userns=keep-id`, a read-only root filesystem, `--cap-drop=all`, `no-new-privileges`, and one loopback publish per port. The tailnet is the only route in, so a `0.0.0.0` publish is a second door that no test permits.
+
+Each image reference is a build-time default in its unit. To move a digest without rebuilding, write `/var/srv/ultus/workloads.env` as root with `OPENCODE_IMAGE=` or `HERMES_IMAGE=`; the unit reads that file after the derived env file, so the override wins. The file is on the data disk, and only root can write it.
+
+```bash
+systemctl status ultus-network.service opencode.service hermes.service
+sudo -u agents env XDG_RUNTIME_DIR=/run/user/1000 podman ps --format '{{.Names}} {{.Status}}'
+```
+
+A new mount, device or capability in either unit is a change to `tests/test-server-isolation.sh` in the same commit. The test parses the shipped units, first against a fixture that carries every rejected spelling, and then against the real ones, so a parser that stops matching fails rather than passing quietly.
+
 ## Recovery
 
 `/etc` and the OS come from the image, so a broken host is rebuilt rather than repaired: reinstall, then restore the data disk from the backup. For a bad upgrade on a host that still boots, revert the deployment:
