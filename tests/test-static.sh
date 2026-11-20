@@ -98,6 +98,31 @@ else
   echo "ok   the base names tailscale and no desktop package, and the server names restic"
 fi
 
+# The server runs its agents as a dedicated rootless user. A missing linger flag
+# means no runtime directory, so rootless Podman cannot start; a missing range
+# means containers cannot map their own users. Both are silent at build time, so
+# name them here.
+server_hook=$repo_root/modules/server/usr/libexec/ultus-atomic/build.d/50-server.sh
+prepare_unit=$repo_root/modules/server/usr/lib/systemd/system/ultus-data-prepare.service
+if ! grep -qF 'useradd -u 1000 -g agents' "$server_hook"; then
+  echo "FAIL the server hook does not create the agents user with uid 1000" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'var/lib/systemd/linger/agents' "$server_hook"; then
+  echo "FAIL the server hook does not write the linger flag, so rootless podman cannot start" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'usermod --add-subuids 100000-165535 --add-subgids 100000-165535 agents' "$server_hook"; then
+  echo "FAIL the server hook does not give agents a subordinate range" >&2
+  failures=$((failures + 1))
+elif ! grep -qF -- '-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0' "$server_hook"; then
+  echo "FAIL useradd keeps login.defs subuid allocation, so agents gets two ranges" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'ConditionPathIsMountPoint=/var/srv' "$prepare_unit"; then
+  echo "FAIL ultus-data-prepare.service does not refuse an unmounted /var/srv" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   the server hook creates agents with a range and linger, and the prepare unit refuses an unmounted disk"
+fi
+
 # The NVIDIA variant installs a second manifest (#72). The shared image reads
 # only packages-common.txt, so the variant names its own file through
 # PACKAGE_MANIFEST_EXTRA. Losing either half of that wiring still builds an

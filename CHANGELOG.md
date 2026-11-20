@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Create the server's rootless `agents` user and the unit that prepares the data-disk subtree. `build.d/50-server.sh` creates uid and gid 1000 with the subordinate range `100000:65536`, writes `/var/lib/systemd/linger/agents` because the build has no systemd to ask, and enables `ultus-data-prepare.service`. That unit carries `ConditionPathIsMountPoint=/var/srv` and repeats the check in `/usr/libexec/ultus/ultus-data-prepare`, because a tmpfiles rule would create the same tree on the OS disk when the data disk is absent and a container would then write to the wrong filesystem. The script creates `/var/srv/ultus` as 0700 `root:root`, `/var/srv/{opencode,hermes,repos}` as 0750 `agents:agents`, and the four workload state directories as 0700 `agents:agents`. `tests/test-static.sh` names each of those four properties when it leaves (#152).
+
 - Record the headless server track in the roadmap (#149). The plan at `docs/superpowers/plans/2026-11-14-tooling-and-platform-roadmap.md` predated the server work, so it listed no server row, no part, and no acceptance. It now carries the merged part 1, the three open parts with their work items, and the spec's vertical slice as the gate before anything is published. No image, manifest, test, or workflow changes.
 
 - Rebuild the NVIDIA variant when the desktop set changes (#158). The variant copies `modules/desktop` and installs `manifests/packages-desktop.txt`, but neither path was in the `image-nvidia` filter, so the job skipped exactly the changes that can break it. This fix would not have run that job otherwise.

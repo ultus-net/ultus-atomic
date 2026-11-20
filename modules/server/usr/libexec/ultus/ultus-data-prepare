@@ -1,0 +1,17 @@
+#!/bin/bash
+# Create the subtree the workloads mount. A tmpfiles rule cannot do this: it
+# would create the same directories on the OS disk when the data disk is absent,
+# and a container would then write to the wrong filesystem.
+set -ouex pipefail
+
+fail() { echo "ultus-data-prepare: $1" >&2; exit 1; }
+
+mountpoint -q /var/srv || fail "/var/srv is not a mountpoint; the data disk did not mount"
+
+# The secrets live here, so root owns this tree and only root may list it.
+install -d -m 0700 -o root -g root /var/srv/ultus
+install -d -m 0750 -o agents -g agents /var/srv/opencode /var/srv/hermes /var/srv/repos
+install -d -m 0700 -o agents -g agents \
+  /var/srv/opencode/share /var/srv/opencode/config /var/srv/opencode/state \
+  /var/srv/hermes/data
+install -d -m 0700 -o agents -g agents /var/lib/agents
