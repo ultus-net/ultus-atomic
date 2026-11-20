@@ -681,12 +681,15 @@ fi
 # (#50). Run 43068532421 printed "fedora login: [ 275.126011] clocksource: ..."
 # and the old end-anchored pattern missed it, burning the whole login budget.
 boot_smoke=$repo_root/tests/vm/boot-smoke.sh
+# The serial helpers moved into the shared library, so the assertions that read
+# them read the library; the marker greps stay on the script that emits them.
+qemu_lib=$repo_root/tests/vm/lib/qemu.sh
 common=$repo_root/build/common.sh
 if ! grep -qF 'wait_for "DUX_USER:${test_user}"' "$boot_smoke" ||
    ! grep -qF "wait_for 'DUX_PROBE_END:ok'" "$boot_smoke" ||
    ! grep -qF "wait_for 'DUX_DIAG_END:ok'" "$boot_smoke" ||
-   ! grep -qF "wait_for '^[A-Za-z0-9._-]+ login: '" "$boot_smoke" ||
-   grep -qF "wait_for 'login: *\$'" "$boot_smoke" ||
+   ! grep -qF "wait_for '^[A-Za-z0-9._-]+ login: '" "$qemu_lib" ||
+   grep -qF "wait_for 'login: *\$'" "$qemu_lib" ||
    ! awk '
       # The operator chose to accept any window of 60s or more (#36), so a
       # later raise does not red the gate. The wait must still be the prompt
@@ -702,9 +705,9 @@ if ! grep -qF 'wait_for "DUX_USER:${test_user}"' "$boot_smoke" ||
       in_fn && /echo "login failed: no shell prompt for \$\{test_user\}" >&2/ { msg = 1 }
       msg && /return 1/ { ret = 1 }
       END { exit !(wait && msg && ret) }
-    ' "$boot_smoke" ||
+    ' "$qemu_lib" ||
    ! grep -qF 'DUX_SETUP_MARKER' "$boot_smoke" ||
-   grep -qE 'wait_for "\$\{test_user\}@" [0-9]+ \|\| true' "$boot_smoke" ||
+   grep -qE 'wait_for "\$\{test_user\}@" [0-9]+ \|\| true' "$qemu_lib" ||
    grep -qF "wait_for 'DUX_DIAG_END'" "$boot_smoke" ||
    grep -qF "wait_for 'DUX_PROBE_END'" "$boot_smoke"; then
   echo "FAIL boot-smoke waits on an echoed marker instead of printf output" >&2
@@ -744,7 +747,7 @@ fi
 # (#50), so the login wait must consume BOOT_TIMEOUT and CI must budget for it.
 # Lowering either brings back a red release for a slow runner, not a broken image.
 ci_workflow=$repo_root/.github/workflows/ci.yml
-if ! grep -qF "login: ' \"\$timeout_s\"" "$boot_smoke" ||
+if ! grep -qF "login: ' \"\$timeout_s\"" "$qemu_lib" ||
    ! awk '
       # Scope to the boot step: a BOOT_TIMEOUT on another job or step must not
       # satisfy this. The env block follows the step name, and the next
