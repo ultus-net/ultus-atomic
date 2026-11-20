@@ -135,6 +135,31 @@ for pair in 'opencode-env.service:opencode' 'hermes-env.service:hermes'; do
   fi
 done
 
+tailnet_unit=$repo_root/modules/server/usr/lib/systemd/system/ultus-tailnet.service
+tailnet_script=$repo_root/modules/server/usr/libexec/ultus/ultus-tailnet
+missing_surfaces=()
+for surface in '--https=443 http://127.0.0.1:4096' \
+               '--https=8443 http://127.0.0.1:9119' \
+               '--https=10000 http://127.0.0.1:8642'; do
+  # The pattern starts with --, so grep needs its own end-of-options marker.
+  grep -qF -- "$surface" "$tailnet_script" || missing_surfaces+=("$surface")
+done
+if ((${#missing_surfaces[@]} > 0)); then
+  echo "FAIL the tailnet script does not publish: ${missing_surfaces[*]}" >&2
+  failures=$((failures + 1))
+elif ! grep -qx 'hostname=ultus-server' "$tailnet_script"; then
+  echo "FAIL the tailnet script does not join as ultus-server" >&2
+  failures=$((failures + 1))
+elif ! grep -qF -- '--hostname="$hostname"' "$tailnet_script"; then
+  echo "FAIL the tailnet join does not pass the host name" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'RequiresMountsFor=/var/srv' "$tailnet_unit"; then
+  echo "FAIL ultus-tailnet.service can run before the data disk is mounted" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   the tailnet script publishes three loopback surfaces as ultus-server"
+fi
+
 # The NVIDIA variant installs a second manifest (#72). The shared image reads
 # only packages-common.txt, so the variant names its own file through
 # PACKAGE_MANIFEST_EXTRA. Losing either half of that wiring still builds an

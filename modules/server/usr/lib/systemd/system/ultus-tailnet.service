@@ -1,0 +1,18 @@
+[Unit]
+Description=Join the tailnet and publish the loopback surfaces
+RequiresMountsFor=/var/srv
+Wants=network-online.target
+After=var-srv.mount tailscaled.service network-online.target
+Before=ultus-health.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/ultus/ultus-tailnet
+# No Restart=: systemd refuses it on Type=oneshot. A failed join leaves the
+# workloads running locally; `systemctl restart ultus-tailnet` retries once the
+# key is replaced.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

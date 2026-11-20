@@ -58,6 +58,26 @@ journalctl -u opencode-env.service
 
 The workload unit requires its env unit, so a workload does not start with a partial environment.
 
+## The tailnet
+
+The box joins the tailnet as `ultus-server` and publishes three surfaces over HTTPS. Nothing else is reachable: no container port binds a wired interface, and `sshd` is disabled.
+
+| URL | Serves |
+| --- | --- |
+| `https://ultus-server.<tailnet>.ts.net` | OpenCode on `127.0.0.1:4096` |
+| `https://ultus-server.<tailnet>.ts.net:8443` | The Hermes dashboard on `127.0.0.1:9119` |
+| `https://ultus-server.<tailnet>.ts.net:10000` | The Hermes API server on `127.0.0.1:8642` |
+
+Write the join key to `/var/srv/ultus/tailscale-authkey`, mode `0600` owned `root:root`, before the first boot, or write it and run `systemctl restart ultus-tailnet.service` afterwards. The script joins once, deletes the key whatever the outcome, and turns on Tailscale SSH, which authenticates by tailnet identity and needs no `authorized_keys`. An already-joined node skips the join and only refreshes the mounts.
+
+```bash
+systemctl status ultus-tailnet.service
+tailscale serve status
+tailscale status
+```
+
+A new surface is three things in one commit: the workload publishes on `127.0.0.1`, `ultus-tailnet` adds a `tailscale serve --bg --https=<port>` line, and `tests/test-server-isolation.sh` runs.
+
 ## Workloads
 
 | Unit | Sees | Publishes on loopback | Image default |

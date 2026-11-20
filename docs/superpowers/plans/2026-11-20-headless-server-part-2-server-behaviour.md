@@ -958,15 +958,17 @@ git commit -m "feat: run the server workloads rootless with an isolation gate (#
 ```bash
 tailnet_unit=$repo_root/modules/server/usr/lib/systemd/system/ultus-tailnet.service
 tailnet_script=$repo_root/modules/server/usr/libexec/ultus/ultus-tailnet
+missing_surfaces=()
 for surface in '--https=443 http://127.0.0.1:4096' \
                '--https=8443 http://127.0.0.1:9119' \
                '--https=10000 http://127.0.0.1:8642'; do
-  if ! grep -qF "$surface" "$tailnet_script"; then
-    echo "FAIL the tailnet script does not publish '$surface'" >&2
-    failures=$((failures + 1))
-  fi
+  # The pattern starts with --, so grep needs its own end-of-options marker.
+  grep -qF -- "$surface" "$tailnet_script" || missing_surfaces+=("$surface")
 done
-if ! grep -qx 'hostname=ultus-server' "$tailnet_script"; then
+if ((${#missing_surfaces[@]} > 0)); then
+  echo "FAIL the tailnet script does not publish: ${missing_surfaces[*]}" >&2
+  failures=$((failures + 1))
+elif ! grep -qx 'hostname=ultus-server' "$tailnet_script"; then
   echo "FAIL the tailnet script does not join as ultus-server" >&2
   failures=$((failures + 1))
 elif ! grep -qF -- '--hostname="$hostname"' "$tailnet_script"; then
@@ -1039,10 +1041,10 @@ Before=ultus-health.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/libexec/ultus/ultus-tailnet
-# No Restart=: systemd refuses it on Type=oneshot, and `systemd-analyze verify`
-# in Task 7 is what catches anyone who adds it back. A failed join leaves the
-# workloads running locally; `systemctl restart ultus-tailnet` retries once the
-# key is replaced.
+# No Restart=: systemd refuses it on Type=oneshot. `systemd-analyze verify` is
+# what catches anyone who adds it back. A failed join leaves the workloads
+# running locally; `systemctl restart ultus-tailnet` retries once the key is
+# replaced.
 TimeoutStartSec=300
 
 [Install]

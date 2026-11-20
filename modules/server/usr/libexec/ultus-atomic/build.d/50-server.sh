@@ -46,6 +46,7 @@ units=(
   ultus-network.service
   opencode.service
   hermes.service
+  ultus-tailnet.service
 )
 systemctl enable "${units[@]}"
 for unit in "${units[@]}"; do

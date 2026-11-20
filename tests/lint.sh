@@ -52,6 +52,7 @@ bash_scripts=(
   modules/server/usr/libexec/ultus-atomic/build.d/50-server.sh
   modules/server/usr/libexec/ultus/ultus-data-prepare
   modules/server/usr/libexec/ultus/ultus-env
+  modules/server/usr/libexec/ultus/ultus-tailnet
   tests/test-server-env.sh
   tests/test-server-isolation.sh
 )

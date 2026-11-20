@@ -1,0 +1,33 @@
+#!/bin/bash
+# Join the tailnet once, then publish every surface over TLS.
+#
+# Loopback publication alone exposes nothing off the box, and this is the only
+# path in: sshd stays disabled and no container port binds a wired interface.
+set -ouex pipefail
+
+key=/var/srv/ultus/tailscale-authkey
+hostname=ultus-server
+
+fail() { echo "ultus-tailnet: $1" >&2; exit 1; }
+
+mountpoint -q /var/srv || fail "/var/srv is not a mountpoint; the data disk did not mount"
+
+state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // empty' || true)
+if [[ $state != Running ]]; then
+  [[ -r $key ]] || fail "no tailnet identity and no auth key at $key"
+  tailscale up --auth-key="file:$key" --hostname="$hostname" --ssh=false
+  # The key is single-use. Remove it whether or not the join reported success,
+  # because a key left on disk is a second door with no owner.
+  shred -u "$key" 2>/dev/null || rm -f "$key"
+fi
+
+# Tailscale SSH authenticates by tailnet identity, so this box carries no
+# authorized_keys and no sshd.
+tailscale set --ssh=true
+
+# --bg keeps each mount across reboots. One target per invocation.
+tailscale serve --bg --https=443 http://127.0.0.1:4096
+tailscale serve --bg --https=8443 http://127.0.0.1:9119
+tailscale serve --bg --https=10000 http://127.0.0.1:8642
+
+tailscale serve status
