@@ -21,7 +21,7 @@ The spec delegates these to the builder. Each row is decided here, with the evid
 | `agents` uid, gid, subuid base | uid 1000, gid 1000, subuid and subgid `100000:65536` | `useradd -u 1000 -g agents` and `usermod --add-subuids 100000-165535` both succeed on the pinned base; `getent passwd agents` printed `agents:x:1000:1000:...:/var/lib/agents:/sbin/nologin` |
 | `--userns=keep-id` write access | keep `--userns=keep-id`, run the container as uid 1000 | Container `id` under `-u 1000 --userns=keep-id` on a uid 1000 host printed `uid=1000 gid=1000`; the mapping is one-to-one with `agents` |
 | OpenCode lifecycle command | `serve --service --hostname 0.0.0.0 --port 4096` | Both forms stay in the foreground on the pinned workload image; `--service` additionally registers the endpoint, and the run answered `401` on `/api/info` under `--read-only` plus the tmpfs set below |
-| Read-only root filesystem | `--read-only` plus tmpfs on `/tmp`, `/run`, `/home/dev/.config`, `/home/dev/.cache` | Without a writable `$HOME` the container exits 1 with `EROFS: read-only file system, mkdir '/home/dev/.local'`; with the four tmpfs and the two `$HOME` bind mounts it runs and serves. `/home/dev/.local` needs no tmpfs because the share bind mount creates it |
+| Read-only root filesystem | `--read-only` plus tmpfs on `/tmp`, `/run`, `/home/dev/.config`, `/home/dev/.cache`, each `:rw,mode=1777` | Without a writable `$HOME` the container exits 1 with `EROFS: read-only file system, mkdir '/home/dev/.local'`; with the four tmpfs and the two `$HOME` bind mounts it runs and serves. `/home/dev/.local` needs no tmpfs because the share bind mount creates it. The mode is not optional: a bare `--tmpfs` is root-owned 0755, and `--tmpfs /home/dev/.cache` alone logs `EACCES: permission denied, mkdir '/home/dev/.cache/opencode'` on the second start. Podman 6.1.4 rejects `uid=` and `tmpfs-uid=`, so `mode=1777` is the only writable form |
 | Workload digest location | Build-time default in the unit's `Environment=`, overridden by `EnvironmentFile=-/var/srv/ultus/workloads.env`, writable by root only | Operator decision, 2026-11-20: part 2 does not move `containers/opencode` or build the digest update service |
 | OpenCode and Hermes defaults | `ghcr.io/ultus-net/devbox@sha256:8649976df3ebbd38f8b6b323b2a8522cb7de6021e969f836ed57c0cf4ab5e81a` and `docker.io/nousresearch/hermes-agent@sha256:41468459379a943cf0a25a55589e230d244bd9f95b83cff5eca789470c892fac` | The devbox image is the published OpenCode v2.1.4 build; upstream `ghcr.io/anomalyco/opencode:latest` is v1.19.6 and runs as root, so it is the wrong pin. The Hermes digest is today's `:latest` amd64 manifest |
 | Restic repository and retention | Same bucket, new prefix. `RESTIC_REPOSITORY` and `RESTIC_PASSWORD_FILE` come from `/var/srv/ultus/backup.env`; retention is `--keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune` on a weekly timer | Operator decision, 2026-11-20 |
@@ -65,6 +65,23 @@ Part 1 shipped these. Each task below extends them; none is created from scratch
 | `tests/verify-image.sh` | Present; `--server` block at `:298-331` checks the desktop-package split, `var-srv.mount`, `tailscale`/`restic`, and the Flathub seed | The user, linger, unit enablement, `systemd-analyze verify`, and the drop-in |
 | `.github/workflows/ci.yml` | Present; `image-server` (`:334-362`) builds and verifies with `timeout-minutes: 120`; `image` (`:169-296`) adds SBOM, the disk build, `boot-smoke.sh`, and the trivy scan | The boot step inside `image-server`; there is no separate boot job to copy |
 | `tests/vm/boot-smoke.sh`, `tests/vm/make-disk.sh` | Present; the boot script takes `[disk.qcow2] [boot.log]`, the disk script takes `[image] [output-dir]` and pins bootc-image-builder by digest | A `boot.log`-compatible server script, and `SERVER_DISK=1` |
+
+## Spike results
+
+Run on 2026-11-20 on the local workstation: Arch Linux, podman 6.1.4, systemd 262. Steps 2, 3 and 4 need root and a booted guest, and the workstation has no non-interactive sudo, so they run on the EliteDesk or through the Task 8 boot test. Nothing in Tasks 2-8 depends on their outcome in a way that changes a file: linger, `systemd-run --uid=` and `keep-id` are the reasons the units carry `After=user-runtime-dir@1000.service` and `--userns=keep-id`, and a failure would stop the part rather than reshape it.
+
+| Step | Command | Observed |
+| --- | --- | --- |
+| 5 | `podman run ... serve --service --hostname 0.0.0.0 --port 4096` | `server listening on http://0.0.0.0:4096`; `/api/info` answers `{"_tag":"UnauthorizedError","message":"Authentication required"}` |
+| 5 | bare `--tmpfs /home/dev/.cache`, then `podman restart` | `Error: EACCES: permission denied, mkdir '/home/dev/.cache/opencode'` |
+| 5 | `--tmpfs /home/dev/.cache:rw,mode=1777`, then `podman restart` | restart clean; one `server listening` line per start; no error |
+| 5 | `--tmpfs /tmp:uid=1000` and `--mount type=tmpfs,...,tmpfs-uid=1000` | `Error: unknown mount option "uid=1000"`; `Error: tmpfs-uid: invalid mount option` |
+| 5 | `curl -u opencode:<password> -H 'content-type: application/json' -d '{"title":"restart-continuity-spike"}' /api/session` | `{"data":{"id":"ses_e07c85be9ffen7qRusB3ACTuXB",...}}` |
+| 5 | `cat config/service.json` before and after `podman restart oc-spike` | the same password both times, because the file is on the data disk, not in the container |
+| 5 | `podman restart oc-spike`, then `GET /api/session` | `ses_e07c85be9ffen7qRusB3ACTuXB restart-continuity-spike` |
+| 2-4 | — | Not run locally: no root. Pending the EliteDesk or the Task 8 boot test |
+
+The second row is the reason every tmpfs in the units carries `:rw,mode=1777`. `podman logs` prints no password, which is the reason Step 5 reads `config/service.json` instead.
 
 ## Global Constraints
 
@@ -192,17 +209,18 @@ Expected: the container prints `uid=1000 gid=1000`, and the host prints `1000:10
 ```bash
 sudo -u agents env HOME=/var/lib/agents XDG_RUNTIME_DIR=/run/user/1000 podman run -d --name oc-spike \
   --userns=keep-id -u 1000 -e HOME=/home/dev --read-only \
-  --tmpfs /tmp --tmpfs /run --tmpfs /home/dev/.config --tmpfs /home/dev/.cache \
+  --tmpfs /tmp:rw,mode=1777 --tmpfs /run:rw,mode=1777 \
+  --tmpfs /home/dev/.config:rw,mode=1777 --tmpfs /home/dev/.cache:rw,mode=1777 \
   -v /var/srv/opencode/share:/home/dev/.local/share/opencode:z \
   -v /var/srv/opencode/config:/home/dev/.config/opencode:z \
   -v /var/srv/opencode/state:/home/dev/.local/state/opencode:z \
   -p 127.0.0.1:4096:4096 \
   ghcr.io/ultus-net/devbox@sha256:8649976df3ebbd38f8b6b323b2a8522cb7de6021e969f836ed57c0cf4ab5e81a \
   serve --service --hostname 0.0.0.0 --port 4096
-podman logs oc-spike | grep 'server password'
+cat /var/srv/opencode/config/service.json
 ```
 
-Take the printed password, then create a session through the API with basic auth (`opencode:<password>`), confirm it lists, `podman restart oc-spike`, and list sessions again.
+The password is not in the log: `serve --service` writes it to `service.json` in the config directory, which is a bind mount on the data disk, so it survives a restart. Take `password` from that file, then create a session through the API with basic auth (`opencode:<password>`), confirm it lists, `podman restart oc-spike`, and list sessions again.
 
 Expected: the session id from before the restart is still listed. Record the command form that produced it. If the session is gone, stop and report: restart continuity is a spec acceptance criterion, and the fix belongs in the image or the mount layout, not in a weaker test.
 
@@ -789,8 +807,8 @@ EnvironmentFile=-/var/srv/ultus/workloads.env
 ExecStart=/usr/bin/podman run --rm --name opencode \
   --userns=keep-id -u 1000 -e HOME=/home/dev \
   --read-only \
-  --tmpfs /tmp --tmpfs /run \
-  --tmpfs /home/dev/.config --tmpfs /home/dev/.cache \
+  --tmpfs /tmp:rw,mode=1777 --tmpfs /run:rw,mode=1777 \
+  --tmpfs /home/dev/.config:rw,mode=1777 --tmpfs /home/dev/.cache:rw,mode=1777 \
   --cap-drop=all --security-opt no-new-privileges \
   --network ultus \
   -p 127.0.0.1:4096:4096 \
@@ -808,7 +826,9 @@ TimeoutStartSec=120
 WantedBy=multi-user.target
 ```
 
-The `--tmpfs /home/dev/.local` from the spike is deliberately absent: `/var/srv/opencode/share` is mounted at `/home/dev/.local/share/opencode`, so `/home/dev/.local` must already exist in the image. It does: the devbox image creates the user with `-m` and the quadlet has always mounted under it. If the first boot logs `mkdir '/home/dev/.local'`, add `--tmpfs /home/dev/.local` before the bind mount, which podman applies in order.
+The `--tmpfs /home/dev/.local` from the spike is deliberately absent: `/var/srv/opencode/share` is mounted at `/home/dev/.local/share/opencode`, so `/home/dev/.local` must already exist in the image. It does: the devbox image creates the user with `-m` and the quadlet has always mounted under it. If the first boot logs `mkdir '/home/dev/.local'`, add `--tmpfs /home/dev/.local:rw,mode=1777` before the bind mount, which podman applies in order.
+
+Every tmpfs carries `:rw,mode=1777`: a bare `--tmpfs` is root-owned 0755 and the container process is uid 1000, so the second start logged `EACCES: permission denied, mkdir '/home/dev/.cache/opencode'`.
 
 - [ ] **Step 4: Write `hermes.service`**
 
@@ -837,7 +857,7 @@ EnvironmentFile=-/var/srv/ultus/workloads.env
 ExecStart=/usr/bin/podman run --rm --name hermes \
   --userns=keep-id -u 1000 \
   --read-only \
-  --tmpfs /tmp --tmpfs /run \
+  --tmpfs /tmp:rw,mode=1777 --tmpfs /run:rw,mode=1777 \
   --cap-drop=all --security-opt no-new-privileges \
   --network ultus \
   -p 127.0.0.1:8642:8642 \
