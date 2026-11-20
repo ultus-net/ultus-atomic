@@ -138,7 +138,7 @@ tests/test-signing.sh
 
 | Gate | What it asserts |
 | --- | --- |
-| `tests/verify-image.sh --server` | No desktop package is installed; `var-srv.mount` is present and enabled; `tailscale` and `restic` are installed; no Flathub remote is seeded; and the third-party set matches `manifests/packages-server.lock`. |
+| `tests/verify-image.sh --server` | No desktop package is installed; `var-srv.mount` is present and enabled; `tailscale` and `restic` are installed; the `agents` user has uid and gid 1000, one `100000:65536` subordinate range in each of `/etc/subuid` and `/etc/subgid`, and the linger flag; every unit this part ships is enabled; every unit passes `systemd-analyze verify`; the download-only drop-in replaces bootc's stock update command; no Flathub remote is seeded; and the third-party set matches `manifests/packages-server.lock`. |
 | `tests/test-server-env.sh` | Runs `ultus-env` in the pinned base against two fixture secrets files: each derived file is `0600 agents:agents`, the OpenCode file carries no Hermes key, each Hermes key is present, and a missing required key fails closed. It needs podman or docker and pulls the base image the `Containerfile` pins. |
 | `tests/test-server-isolation.sh` | Parses every unit in `modules/server/usr/lib/systemd/system/` and rejects `--privileged`, host namespaces, `--cap-add`, `--device`, `label=disable`, a host home or root home mount, a Podman or Docker socket, and any publish without `127.0.0.1`. It first runs against `tests/fixtures/server-units/widened.service`, which carries every rejected spelling, so a parser that stops matching reds here instead of passing quietly. |
 
