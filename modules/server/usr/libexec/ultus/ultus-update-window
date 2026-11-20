@@ -1,0 +1,50 @@
+#!/bin/bash
+# Apply a downloaded deployment inside the maintenance window.
+#
+# The stock timer is left enabled and downloads only. This unit is the only
+# place that applies, and it drains the workloads first so a turn is not cut
+# mid-write.
+set -ouex pipefail
+
+state=/var/lib/ultus
+staged_since=$state/staged-since
+
+log() { echo "ultus-update-window: $1" | systemd-cat -t ultus-update-window; }
+
+staged=$(bootc status --format=json | jq -r '.status.staged // empty')
+if [[ -z $staged ]]; then
+  rm -f "$staged_since"
+  log "no staged deployment; nothing to apply"
+  exit 0
+fi
+
+install -d -m 0755 "$state"
+now=$(date +%s)
+if [[ -r $staged_since ]]; then
+  since=$(cat "$staged_since")
+  # A truncated or hand-edited file must not turn into an arithmetic error and
+  # a silent no-op, so treat anything that is not a number as "first seen now".
+  [[ $since =~ ^[0-9]+$ ]] || since=$now
+else
+  since=$now
+  printf '%s\n' "$now" >"$staged_since"
+fi
+age=$(( (now - since) / 86400 ))
+if ((age >= 14)); then
+  log "the staged deployment waited ${age} days; applying and rebooting anyway"
+fi
+
+systemctl stop opencode.service hermes.service
+
+rc=0
+bootc upgrade --from-downloaded --apply || rc=$?
+if ((rc != 0)); then
+  log "the apply failed with status ${rc}; restarting the workloads and not rebooting"
+  systemctl start opencode.service hermes.service || true
+  exit "$rc"
+fi
+
+# --apply normally reboots. If it returns, reboot explicitly so the window has
+# one outcome rather than two.
+log "applied the staged deployment; rebooting into it"
+systemctl reboot

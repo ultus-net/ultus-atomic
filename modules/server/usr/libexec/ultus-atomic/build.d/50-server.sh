@@ -47,9 +47,18 @@ units=(
   opencode.service
   hermes.service
   ultus-tailnet.service
+  # The health, backup and window services carry no [Install] section, so
+  # `systemctl is-enabled` reports them static. Their timers are the only thing
+  # that starts them, and the timers are what is enabled here.
+  ultus-health.timer
+  ultus-backup.timer
+  ultus-backup-forget.timer
+  ultus-update-window.timer
 )
 systemctl enable "${units[@]}"
-for unit in "${units[@]}"; do
+# bootc's own timer is enabled by its package and is not ours to enable; it is
+# asserted here because the drop-in only takes effect while it runs.
+for unit in "${units[@]}" bootc-fetch-apply-updates.timer; do
   enabled=$(systemctl is-enabled "$unit" || true)
   [[ $enabled == enabled ]] || {
     echo "$unit is not enabled (got: ${enabled:-nothing}); it would never run on the host" >&2

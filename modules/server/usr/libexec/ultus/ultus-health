@@ -1,0 +1,19 @@
+#!/bin/bash
+# Probe each workload's real endpoint and restart a unit that is up but not
+# answering. A process check alone passes a server that serves nothing.
+set -ouex pipefail
+
+probe() {
+  local unit=$1 url=$2 code
+  systemctl is-active --quiet "$unit" || return 0
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" || true)
+  case $code in
+    200|401) return 0 ;;
+  esac
+  echo "ultus-health: $url answered ${code:-nothing}; restarting $unit" >&2
+  systemctl restart "$unit"
+}
+
+# 401 is healthy for both surfaces: the server is up and asking for credentials.
+probe opencode.service http://127.0.0.1:4096/api/info
+probe hermes.service http://127.0.0.1:8642/health

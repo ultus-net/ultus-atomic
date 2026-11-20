@@ -96,6 +96,87 @@ sudo -u agents env XDG_RUNTIME_DIR=/run/user/1000 podman ps --format '{{.Names}}
 
 A new mount, device or capability in either unit is a change to `tests/test-server-isolation.sh` in the same commit. The test parses the shipped units, first against a fixture that carries every rejected spelling, and then against the real ones, so a parser that stops matching fails rather than passing quietly.
 
+## Health
+
+`ultus-health.timer` probes both workloads every minute. A unit that is active but not answering is restarted:
+
+| Probe | Healthy answers |
+| --- | --- |
+| `http://127.0.0.1:4096/api/info` | `200`, or `401` for a server asking for credentials |
+| `http://127.0.0.1:8642/health` | `200`, or `401` for a server asking for credentials |
+
+A restart is logged rather than silent:
+
+```bash
+journalctl -t ultus-health
+systemctl list-timers 'ultus-*'
+```
+
+The probe runs only against a unit systemd already reports active. A unit that crashed or is stopped is left to its own `Restart=on-failure`, so the timer does not resurrect a workload the operator stopped on purpose.
+
+## Backup
+
+The nightly backup runs at 02:30 with the workloads stopped, so restic reads a quiescent tree.
+
+| Unit | When | Does |
+| --- | --- | --- |
+| `ultus-backup.timer` | daily 02:30 | Stops both workloads, runs `restic backup`, starts them again on every exit path |
+| `ultus-backup-forget.timer` | Sunday 03:30 | Applies `--keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune` |
+
+Both timers are `Persistent=true`, so a window missed while the box was off runs on the next boot. The backup covers `/var/srv/ultus`, `/var/srv/opencode`, `/var/srv/hermes` and `/var/srv/repos`. The secrets file is inside the backup on purpose: the repository is the only way to rebuild after a disk failure.
+
+Credentials live in `/var/srv/ultus/backup.env`, mode `0600` owned `root:root`. The units carry no `EnvironmentFile=`, because systemd publishes a unit's environment to any user through `systemctl show`. `ultus-backup` parses the file itself, exports only the `RESTIC_`, `AWS_` and `B2_` key prefixes, and checks the mode before it reads.
+
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `RESTIC_REPOSITORY` | yes | The repository URL |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | for S3 | Repository credentials |
+| `B2_ACCOUNT_ID`, `B2_ACCOUNT_KEY` | for B2 | Repository credentials |
+| `RESTIC_PASSWORD_FILE` | no | Defaults to `/var/srv/ultus/restic-password` |
+
+A run by hand takes the same path:
+
+```bash
+sudo /usr/libexec/ultus/ultus-backup
+sudo /usr/libexec/ultus/ultus-backup forget
+```
+
+Retention is automatic. `--keep-*` bounds what `forget` can delete, and `ultus-backup-forget.timer` prunes only weekly, so a wrong policy surfaces in `restic snapshots` before a month of history is gone. To take retention back into your hands, disable the timer:
+
+```bash
+sudo systemctl disable --now ultus-backup-forget.timer
+```
+
+Restore is a fresh install followed by restic: reinstall from the ISO, create the `ultus-data` partition, then restore into the mounted disk:
+
+```bash
+sudo mount /dev/disk/by-label/ultus-data /var/srv
+sudo restic restore latest --target / --include /var/srv
+sudo systemctl reboot
+```
+
+## Updates
+
+The image uses bootc's own update timer, with one change: the stock unit applies and reboots at boot plus one hour. A drop-in replaces that command with `bootc upgrade --download-only --quiet`, so `bootc-fetch-apply-updates.timer` only downloads. Nothing applies outside a window.
+
+`ultus-update-window.timer` runs at 04:00 and is the only thing that applies:
+
+1. It reads `bootc status --format=json` for a staged deployment. With none, it exits and clears its marker.
+2. It records the first time it saw the staged deployment in `/var/lib/ultus/staged-since`, and logs a warning once that deployment has waited 14 days.
+3. It stops both workloads, then runs `bootc upgrade --from-downloaded --apply`.
+4. On a failed apply it restarts the workloads and does not reboot. On success it reboots into the new deployment.
+
+To opt out, disable the timer; the stock `bootc-fetch-apply-updates.timer` keeps downloading but nothing applies:
+
+```bash
+sudo systemctl disable --now ultus-update-window.timer
+```
+
+```bash
+systemctl list-timers 'ultus-*' bootc-fetch-apply-updates.timer
+journalctl -t ultus-update-window
+```
+
 ## Recovery
 
 `/etc` and the OS come from the image, so a broken host is rebuilt rather than repaired: reinstall, then restore the data disk from the backup. For a bad upgrade on a host that still boots, revert the deployment:

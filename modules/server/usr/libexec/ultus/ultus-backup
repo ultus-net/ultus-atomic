@@ -1,0 +1,52 @@
+#!/bin/bash
+# Back up the data disk, or apply the retention policy, with the workloads
+# stopped for the backup.
+#
+# /var/srv is a plain directory on the OS disk when the mount fails, and backing
+# that up stores an empty tree that looks like a backup. Refuse it here as well as
+# in the unit, because a manual run bypasses the unit.
+#
+#   ultus-backup          back up
+#   ultus-backup forget   apply the retention policy
+set -ouex pipefail
+
+op=${1:-backup}
+case $op in
+  backup|forget) ;;
+  *) echo "ultus-backup: usage: ultus-backup [backup|forget]" >&2; exit 2 ;;
+esac
+
+fail() { echo "ultus-backup: $1" >&2; exit 1; }
+
+env_file=/var/srv/ultus/backup.env
+
+mountpoint -q /var/srv || fail "/var/srv is not a mountpoint; the data disk did not mount"
+[[ -r $env_file ]] || fail "cannot read $env_file"
+
+# Read the credentials here rather than through EnvironmentFile=: systemd
+# publishes a unit's environment to unprivileged `systemctl show`, and this file
+# holds the repository credentials. Only the RESTIC_*, AWS_* and B2_* keys are
+# exported, so the workloads' secrets cannot reach the restic process.
+file_mode=$(stat -c '%a %U' "$env_file")
+[[ $file_mode == '600 root' ]] || fail "$env_file must be mode 0600 owned by root, got $file_mode"
+
+while IFS= read -r line || [[ -n $line ]]; do
+  [[ $line =~ ^[[:space:]]*(#|$) ]] && continue
+  key=${line%%=*}
+  case $key in
+    RESTIC_*|AWS_*|B2_*) export "$key=${line#*=}" ;;
+  esac
+done <"$env_file"
+
+: "${RESTIC_REPOSITORY:?$env_file must set RESTIC_REPOSITORY}"
+export RESTIC_PASSWORD_FILE=${RESTIC_PASSWORD_FILE:-/var/srv/ultus/restic-password}
+
+# The secret files are inside the backup on purpose: the repository is the only
+# way to rebuild after a disk failure.
+if [[ $op == forget ]]; then
+  exec restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+fi
+exec restic backup \
+  --tag ultus-server \
+  --exclude-caches \
+  /var/srv/ultus /var/srv/opencode /var/srv/hermes /var/srv/repos

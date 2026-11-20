@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply the restic retention policy
+# The same script reads the credentials, so this unit carries no EnvironmentFile=
+# and nothing reaches `systemctl show`.
+RequiresMountsFor=/var/srv
+After=ultus-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/ultus/ultus-backup forget
+TimeoutStartSec=3600

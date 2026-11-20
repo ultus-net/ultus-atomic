@@ -1,0 +1,7 @@
+[Unit]
+Description=Probe the agent workloads and restart a silent one
+After=opencode.service hermes.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/ultus/ultus-health

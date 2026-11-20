@@ -53,6 +53,9 @@ bash_scripts=(
   modules/server/usr/libexec/ultus/ultus-data-prepare
   modules/server/usr/libexec/ultus/ultus-env
   modules/server/usr/libexec/ultus/ultus-tailnet
+  modules/server/usr/libexec/ultus/ultus-health
+  modules/server/usr/libexec/ultus/ultus-backup
+  modules/server/usr/libexec/ultus/ultus-update-window
   tests/test-server-env.sh
   tests/test-server-isolation.sh
 )

@@ -160,6 +160,41 @@ else
   echo "ok   the tailnet script publishes three loopback surfaces as ultus-server"
 fi
 
+# The backup's whole point is the data disk, and /var/srv is a plain directory on
+# the OS disk when the mount fails. A backup of that stores an empty tree that
+# restores as a wiped box, so the unit must refuse it. The credentials stay out
+# of systemd's unit environment: `systemctl show` publishes that to any user.
+server_units=$repo_root/modules/server/usr/lib/systemd/system
+backup_unit=$server_units/ultus-backup.service
+backup_script=$repo_root/modules/server/usr/libexec/ultus/ultus-backup
+window_script=$repo_root/modules/server/usr/libexec/ultus/ultus-update-window
+dropin=$server_units/bootc-fetch-apply-updates.service.d/download-only.conf
+if ! grep -qF 'ConditionPathIsMountPoint=/var/srv' "$backup_unit"; then
+  echo "FAIL ultus-backup.service would back up an unmounted /var/srv" >&2
+  failures=$((failures + 1))
+elif grep -qE '^EnvironmentFile=' "$backup_unit" "$server_units/ultus-backup-forget.service"; then
+  echo "FAIL a backup unit puts the repository credentials in systemd's unit environment" >&2
+  failures=$((failures + 1))
+elif ! grep -qF -- '--keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune' "$backup_script"; then
+  echo "FAIL ultus-backup does not apply the operator's retention policy" >&2
+  failures=$((failures + 1))
+elif ! grep -qE '^ExecStopPost=-?/usr/bin/systemctl start opencode\.service hermes\.service$' "$backup_unit"; then
+  echo "FAIL ultus-backup.service does not restart the workloads after a failed or finished backup" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'bootc upgrade --download-only --quiet' "$dropin" ||
+     ! grep -qx 'ExecStart=' "$dropin"; then
+  echo "FAIL the drop-in does not replace the stock update command with --download-only" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'bootc upgrade --from-downloaded --apply' "$window_script"; then
+  echo "FAIL the window does not apply the staged deployment" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'systemctl start opencode.service hermes.service' "$window_script"; then
+  echo "FAIL the window does not restart the workloads when the apply fails" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   the backup refuses an unmounted disk, restarts the workloads, and the window applies only a staged deployment"
+fi
+
 # The NVIDIA variant installs a second manifest (#72). The shared image reads
 # only packages-common.txt, so the variant names its own file through
 # PACKAGE_MANIFEST_EXTRA. Losing either half of that wiring still builds an

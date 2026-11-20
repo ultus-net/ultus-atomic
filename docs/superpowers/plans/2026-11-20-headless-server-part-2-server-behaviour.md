@@ -1100,7 +1100,7 @@ dropin=$repo_root/modules/server/usr/lib/systemd/system/bootc-fetch-apply-update
 if ! grep -qF 'ConditionPathIsMountPoint=/var/srv' "$backup_unit"; then
   echo "FAIL ultus-backup.service would back up an unmounted /var/srv" >&2
   failures=$((failures + 1))
-elif grep -qF 'EnvironmentFile=/var/srv/ultus/backup.env' "$backup_unit" \
+elif grep -qE '^EnvironmentFile=' "$backup_unit" \
     "$repo_root/modules/server/usr/lib/systemd/system/ultus-backup-forget.service"; then
   echo "FAIL a backup unit puts the repository credentials in systemd's unit environment" >&2
   failures=$((failures + 1))
