@@ -48,6 +48,7 @@ The image ships no interactive user. A real install creates the operator account
 
 - [Build](docs/build.md)
 - [Install](docs/install.md)
+- [Headless server](docs/server.md)
 - [First login](docs/first-login.md)
 - [Desktop](docs/desktop.md)
 - [Applications](docs/applications.md)

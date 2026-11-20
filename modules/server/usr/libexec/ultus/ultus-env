@@ -1,0 +1,79 @@
+#!/bin/bash
+# Derive one workload's environment file from the operator's secrets file.
+#
+# The secrets file is data. This parses it rather than sourcing it, so a value
+# cannot execute anything, and each workload sees only the keys it needs: a
+# backup or a dashboard bug in one container cannot read the other's secrets.
+# No -x: tracing prints every value it assigns, and this script handles the
+# plaintext secrets that the trace would then leave in the journal.
+set -oue pipefail
+
+workload=${1:-}
+case $workload in
+  opencode|hermes) ;;
+  *) echo "ultus-env: usage: ultus-env opencode|hermes" >&2; exit 2 ;;
+esac
+
+secrets=/var/srv/ultus/secrets.env
+out=/run/ultus/${workload}.env
+
+fail() { echo "ultus-env: $1" >&2; exit 1; }
+
+mountpoint -q /var/srv || fail "/var/srv is not a mountpoint; the data disk did not mount"
+[[ -r $secrets ]] || fail "cannot read $secrets"
+
+case $workload in
+  opencode)
+    required=(OPENCODE_PASSWORD)
+    passthrough=(OPENCODE_PASSWORD TZ)
+    ;;
+  hermes)
+    required=(OPENCODE_PASSWORD API_SERVER_KEY)
+    provider=(OPENROUTER_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY)
+    passthrough=(OPENCODE_PASSWORD API_SERVER_KEY "${provider[@]}"
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET TELEGRAM_BOT_TOKEN DISCORD_BOT_TOKEN TZ)
+    ;;
+esac
+
+declare -A val=()
+while IFS= read -r line || [[ -n $line ]]; do
+  line=${line%$'\r'}
+  [[ $line =~ ^[[:space:]]*(#|$) ]] && continue
+  [[ $line == *=* ]] || continue
+  key=${line%%=*}
+  value=${line#*=}
+  if [[ $value == \"*\" ]]; then
+    value=${value:1:-1}
+  elif [[ $value == \'*\' ]]; then
+    value=${value:1:-1}
+  fi
+  val[$key]=$value
+done <"$secrets"
+
+for key in "${required[@]}"; do
+  [[ -n ${val[$key]:-} ]] || fail "$key is unset or empty in $secrets"
+done
+
+if [[ $workload == hermes ]]; then
+  found=0
+  for key in "${provider[@]}"; do
+    [[ -n ${val[$key]:-} ]] && found=1
+  done
+  ((found)) || fail "no model provider key is set in $secrets"
+fi
+
+install -d -m 0750 -o root -g agents /run/ultus
+tmp=$(mktemp "/run/ultus/.${workload}.env.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+for key in "${passthrough[@]}"; do
+  [[ -n ${val[$key]:-} ]] || continue
+  printf '%s=%s\n' "$key" "${val[$key]}"
+done >"$tmp"
+chown agents:agents "$tmp"
+chmod 0600 "$tmp"
+# mv replaces the target atomically, so a workload never reads a half-written file.
+mv -f "$tmp" "$out"
+trap - EXIT
+
+echo "ultus-env: wrote $out"

@@ -37,3 +37,12 @@ touch /var/lib/systemd/linger/agents
 chmod 0644 /var/lib/systemd/linger/agents
 
 systemctl enable ultus-data-prepare.service
+
+systemctl enable opencode-env.service hermes-env.service
+for unit in opencode-env.service hermes-env.service; do
+  enabled=$(systemctl is-enabled "$unit" || true)
+  [[ $enabled == enabled ]] || {
+    echo "$unit is not enabled (got: ${enabled:-nothing}); the workload would start with no secrets" >&2
+    exit 1
+  }
+done

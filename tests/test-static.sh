@@ -123,6 +123,18 @@ else
   echo "ok   the server hook creates agents with a range and linger, and the prepare unit refuses an unmounted disk"
 fi
 
+for pair in 'opencode-env.service:opencode' 'hermes-env.service:hermes'; do
+  unit=${pair%%:*}
+  role=${pair##*:}
+  if ! grep -qF "/usr/libexec/ultus/ultus-env ${role}" \
+      "$repo_root/modules/server/usr/lib/systemd/system/${unit}"; then
+    echo "FAIL ${unit} does not derive the ${role} environment" >&2
+    failures=$((failures + 1))
+  else
+    echo "ok   ${unit} derives the ${role} environment"
+  fi
+done
+
 # The NVIDIA variant installs a second manifest (#72). The shared image reads
 # only packages-common.txt, so the variant names its own file through
 # PACKAGE_MANIFEST_EXTRA. Losing either half of that wiring still builds an

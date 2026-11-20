@@ -139,6 +139,7 @@ tests/test-signing.sh
 | Gate | What it asserts |
 | --- | --- |
 | `tests/verify-image.sh --server` | No desktop package is installed; `var-srv.mount` is present and enabled; `tailscale` and `restic` are installed; no Flathub remote is seeded; and the third-party set matches `manifests/packages-server.lock`. |
+| `tests/test-server-env.sh` | Runs `ultus-env` in the pinned base against two fixture secrets files: each derived file is `0600 agents:agents`, the OpenCode file carries no Hermes key, each Hermes key is present, and a missing required key fails closed. It needs podman or docker and pulls the base image the `Containerfile` pins. |
 
 The server VM slice is a later part.
 

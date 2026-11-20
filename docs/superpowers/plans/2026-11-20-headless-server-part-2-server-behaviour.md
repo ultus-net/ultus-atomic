@@ -135,7 +135,7 @@ The failure modes the spec implies and no shipped unit covers yet. Each has a te
 | `tests/test-server-isolation.sh` | New static gate; parses units, rejects a widened fixture |
 | `tests/test-server-env.sh` | New host gate; runs `ultus-env` against fixture secrets in a container |
 | `tests/fixtures/server-units/widened.service` | The adversarial unit the isolation test must reject |
-| `tests/fixtures/server-secrets.env`, `server-secrets-partial.env` | Env test inputs, placeholders only |
+| `tests/fixtures/server-secrets.txt`, `server-secrets-partial.txt` | Env test inputs, placeholders only |
 | `tests/verify-image.sh` | `--server` block extended with the user, linger, units and listener assertions |
 | `tests/vm/lib/qemu.sh` | QEMU boot plumbing extracted from `boot-smoke.sh` |
 | `tests/vm/boot-smoke-server.sh` | Server boot, isolation canaries, backup restore, reboot continuity |
@@ -382,7 +382,7 @@ git commit -m "feat: create the server agents user and data-disk prep (#152)"
 - Create: `modules/server/usr/lib/systemd/system/opencode-env.service`
 - Create: `modules/server/usr/lib/systemd/system/hermes-env.service`
 - Create: `tests/test-server-env.sh`
-- Create: `tests/fixtures/server-secrets.env`, `tests/fixtures/server-secrets-partial.env`
+- Create: `tests/fixtures/server-secrets.txt`, `tests/fixtures/server-secrets-partial.txt`
 - Modify: `tests/test-static.sh` (assert both units name their workload)
 - Modify: `tests/lint.sh` (add the script and the test)
 - Docs: `CHANGELOG.md`, `docs/server.md` (first version of the page)
@@ -430,7 +430,7 @@ run_case() {
     "
 }
 
-out=$(run_case "$fixtures/server-secrets.env" opencode)
+out=$(run_case "$fixtures/server-secrets.txt" opencode)
 grep -qx '600 agents:agents' <<<"$out" || { echo "FAIL the opencode env is not 0600 agents:agents: $out" >&2; exit 1; }
 grep -qx 'OPENCODE_PASSWORD=server-secret' <<<"$out" || { echo "FAIL the opencode password is missing from the derived env" >&2; exit 1; }
 if grep -q 'API_SERVER_KEY' <<<"$out"; then
@@ -438,14 +438,14 @@ if grep -q 'API_SERVER_KEY' <<<"$out"; then
 fi
 echo "ok   the opencode env holds its own keys, 0600, owned by agents"
 
-out=$(run_case "$fixtures/server-secrets.env" hermes)
+out=$(run_case "$fixtures/server-secrets.txt" hermes)
 grep -qx 'API_SERVER_KEY=api-key' <<<"$out" || { echo "FAIL the Hermes env is missing its API key" >&2; exit 1; }
 grep -qx 'OPENROUTER_API_KEY=provider-key' <<<"$out" || { echo "FAIL the Hermes env is missing the provider key" >&2; exit 1; }
 echo "ok   the Hermes env holds the required keys and the provider key"
 
 for case in opencode hermes; do
   rc=0
-  out=$(run_case "$fixtures/server-secrets-partial.env" "$case" 2>&1) || rc=$?
+  out=$(run_case "$fixtures/server-secrets-partial.txt" "$case" 2>&1) || rc=$?
   if [[ $rc -eq 0 ]]; then
     echo "FAIL ultus-env ${case} accepted a secrets file with no password" >&2
     exit 1
@@ -456,7 +456,7 @@ done
 echo "server env tests passed"
 ```
 
-`tests/fixtures/server-secrets.env`:
+`tests/fixtures/server-secrets.txt`:
 
 ```text
 # Fixture for tests/test-server-env.sh. Every value is a placeholder.
@@ -466,12 +466,14 @@ OPENROUTER_API_KEY=provider-key
 TZ=UTC
 ```
 
-`tests/fixtures/server-secrets-partial.env`:
+`tests/fixtures/server-secrets-partial.txt`:
 
 ```text
 # Fixture for the fail-closed case: no OPENCODE_PASSWORD, no API_SERVER_KEY.
 OPENROUTER_API_KEY=provider-key
 ```
+
+Both fixtures are `.txt`. A `.env` name is what the editor's deny rule and a secret scanner treat as a real secret, and these values are placeholders.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -487,7 +489,9 @@ Expected: FAIL, because `modules/server/usr/libexec/ultus/ultus-env` does not ex
 # The secrets file is data. This parses it rather than sourcing it, so a value
 # cannot execute anything, and each workload sees only the keys it needs: a
 # backup or a dashboard bug in one container cannot read the other's secrets.
-set -ouex pipefail
+# No -x: tracing prints every value it assigns, and this script handles the
+# plaintext secrets that the trace would then leave in the journal.
+set -oue pipefail
 
 workload=${1:-}
 case $workload in

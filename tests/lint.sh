@@ -51,6 +51,8 @@ bash_scripts=(
   modules/desktop/usr/libexec/ultus-atomic/build.d/50-desktop.sh
   modules/server/usr/libexec/ultus-atomic/build.d/50-server.sh
   modules/server/usr/libexec/ultus/ultus-data-prepare
+  modules/server/usr/libexec/ultus/ultus-env
+  tests/test-server-env.sh
 )
 posix_scripts=(
   modules/desktop/usr/libexec/ultus-atomic/needs-setup.sh
