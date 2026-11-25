@@ -747,13 +747,10 @@ else
   echo "ok   boot-smoke.sh keeps the opt-in POST_LOGIN_CMD hook fail-closed"
 fi
 
-# A kernel console message can land inside a line the guest is writing and split
-# a marker across two lines: run 45553885679 printed
-# "ULTUS_NODISK_CON[  204.3] audit: ..." then "TAINER:absent", so the marker
-# wait timed out on a marker that had arrived. Both matchers must normalize the
-# log first. The fixtures also pin what normalization may not do: it must not
-# join two guest lines that no kernel message interrupted, and it must not count
-# a marker that appears only inside a kernel message (#162).
+# Fixtures pin normalize_log's contract (#162): the marker run 45553885679 split
+# is joined with the kernel text gone and no second match, while adjacent guest
+# lines and a marker inside a kernel message are not counted. Both matchers must
+# call the helper.
 server_boot=$repo_root/tests/vm/boot-smoke-server.sh
 split_log=$cond_root/console-split.log
 adjacent_log=$cond_root/console-adjacent.log
@@ -763,18 +760,20 @@ printf '%s\n' \
   'TAINER:absent' >"$split_log"
 printf '%s\n' 'ULTUS_NODISK_CON' 'TAINER:absent' >"$adjacent_log"
 printf '%s\n' '[  204.301924] kernel: ULTUS_NODISK_CONTAINER:absent' >"$kernel_log"
-normalized_has() {
-  bash -c 'source "$1"; normalize_log <"$2"' _ "$qemu_lib" "$1" | grep -qxF "$2"
+normalized() {
+  bash -c 'source "$1"; normalize_log <"$2"' _ "$qemu_lib" "$1"
 }
-if ! normalized_has "$split_log" 'ULTUS_NODISK_CONTAINER:absent' ||
-   normalized_has "$adjacent_log" 'ULTUS_NODISK_CONTAINER:absent' ||
-   normalized_has "$kernel_log" 'ULTUS_NODISK_CONTAINER:absent' ||
+split_out=$(normalized "$split_log")
+if [[ $split_out != 'ULTUS_NODISK_CONTAINER:absent' ]] ||
+   [[ $(normalized "$split_log" | grep -cF 'ULTUS_NODISK_CONTAINER:absent') != 1 ]] ||
+   [[ $(normalized "$adjacent_log") != $'ULTUS_NODISK_CON\nTAINER:absent' ]] ||
+   [[ -n $(normalized "$kernel_log") ]] ||
    ! grep -qF 'normalize_log <"$log" | grep -cE' "$qemu_lib" ||
    ! grep -qF '"$log" | normalize_log | grep -cE' "$server_boot"; then
-  echo "FAIL console normalization does not rejoin a split marker, or overmatches one" >&2
+  echo "FAIL console normalization does not rejoin a split marker exactly, or overmatches one" >&2
   failures=$((failures + 1))
 else
-  echo "ok   a split console marker is matched after normalization, and nothing else is"
+  echo "ok   a split console marker is joined exactly once, and nothing else is"
 fi
 
 # A hosted TCG boot reached the login prompt after 21 minutes in run 43068532421
