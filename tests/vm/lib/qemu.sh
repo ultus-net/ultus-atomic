@@ -145,10 +145,13 @@ vm_cleanup() {
   fi
 }
 
-# A kernel console message can land in the middle of a line the guest is
-# writing, splitting a marker across two physical lines. Drop those messages
-# and the newline that ends them, so the halves rejoin before a match. A
-# caller that prints diagnostics still reads the raw log.
+# Contract: only a kernel message that starts with its console timestamp is
+# removed, together with the newline that ends it, so a marker the guest wrote
+# on both sides of that message rejoins. Guest text on two adjacent lines is
+# not joined, and a marker that appears only inside a kernel message is dropped
+# rather than counted as guest output. Needs GNU sed for -z; the dev hosts and
+# the Ubuntu runner carry it. A caller that prints diagnostics still reads the
+# raw log.
 normalize_log() {
   sed -z -E 's/\[[[:space:]]*[0-9]+\.[0-9]+\][^\n]*\n?//g'
 }

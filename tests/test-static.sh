@@ -751,20 +751,30 @@ fi
 # a marker across two lines: run 45553885679 printed
 # "ULTUS_NODISK_CON[  204.3] audit: ..." then "TAINER:absent", so the marker
 # wait timed out on a marker that had arrived. Both matchers must normalize the
-# log first, and the normalizer must rejoin the halves (#162).
+# log first. The fixtures also pin what normalization may not do: it must not
+# join two guest lines that no kernel message interrupted, and it must not count
+# a marker that appears only inside a kernel message (#162).
 server_boot=$repo_root/tests/vm/boot-smoke-server.sh
 split_log=$cond_root/console-split.log
+adjacent_log=$cond_root/console-adjacent.log
+kernel_log=$cond_root/console-kernel.log
 printf '%s\n' \
   'ULTUS_NODISK_CON[  204.301924] audit: type=1105 audit(1.2:3): res=success' \
   'TAINER:absent' >"$split_log"
-if ! bash -c 'source "$1"; normalize_log <"$2" | grep -qx "ULTUS_NODISK_CONTAINER:absent"' \
-     _ "$qemu_lib" "$split_log" ||
+printf '%s\n' 'ULTUS_NODISK_CON' 'TAINER:absent' >"$adjacent_log"
+printf '%s\n' '[  204.301924] kernel: ULTUS_NODISK_CONTAINER:absent' >"$kernel_log"
+normalized_has() {
+  bash -c 'source "$1"; normalize_log <"$2"' _ "$qemu_lib" "$1" | grep -qxF "$2"
+}
+if ! normalized_has "$split_log" 'ULTUS_NODISK_CONTAINER:absent' ||
+   normalized_has "$adjacent_log" 'ULTUS_NODISK_CONTAINER:absent' ||
+   normalized_has "$kernel_log" 'ULTUS_NODISK_CONTAINER:absent' ||
    ! grep -qF 'normalize_log <"$log" | grep -cE' "$qemu_lib" ||
    ! grep -qF '"$log" | normalize_log | grep -cE' "$server_boot"; then
-  echo "FAIL a console marker split by a kernel message is not normalized before matching" >&2
+  echo "FAIL console normalization does not rejoin a split marker, or overmatches one" >&2
   failures=$((failures + 1))
 else
-  echo "ok   a console marker split by a kernel message is matched after normalization"
+  echo "ok   a split console marker is matched after normalization, and nothing else is"
 fi
 
 # A hosted TCG boot reached the login prompt after 21 minutes in run 43068532421
