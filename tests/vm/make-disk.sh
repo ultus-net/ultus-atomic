@@ -12,6 +12,10 @@
 # account for the login stage. Override it with TEST_USER and TEST_PASSWORD, or
 # skip it with NO_TEST_USER=1. A production install creates the real account
 # with useradd or the installer, never through this script.
+#
+# SERVER_DISK=1 also writes $out/qcow2/data.qcow2, a sparse 8 GiB ext4 file
+# labelled ultus-data, because every server workload starts only when /var/srv
+# is a mountpoint and the boot test needs that second disk to prove it.
 
 set -euo pipefail
 
@@ -21,6 +25,9 @@ out=${2:-$repo_root/output}
 test_user=${TEST_USER:-dux}
 test_password=${TEST_PASSWORD:-dux-test}
 mkdir -p "$out"
+# Podman reads a relative bind source as a named volume, so the argument the
+# header documents has to become an absolute path before it reaches -v.
+out=$(cd "$out" && pwd)
 
 if ! podman image exists "$image"; then
   echo "image $image is not in rootful podman storage" >&2
@@ -31,6 +38,14 @@ fi
 with_test_user=1
 if [[ ${NO_TEST_USER:-0} == 1 ]]; then
   with_test_user=0
+fi
+
+# The server boot test drives system units, so its account needs sudo. A server
+# disk without an account cannot run those probes at all.
+server_disk=${SERVER_DISK:-0}
+if [[ $server_disk == 1 && $with_test_user == 0 ]]; then
+  echo "SERVER_DISK=1 needs the test account; drop NO_TEST_USER=1" >&2
+  exit 2
 fi
 
 if ((with_test_user)); then
@@ -55,11 +70,18 @@ trap 'rm -rf "$config_dir"' EXIT
     echo '[[customizations.user]]'
     printf 'name = "%s"\n' "$test_user"
     printf 'password = "%s"\n' "$test_password"
+    if [[ $server_disk == 1 ]]; then
+      echo 'groups = ["wheel"]'
+    fi
   fi
 } >"$config_dir/config.toml"
 config_args=(-v "$config_dir/config.toml:/config.toml:ro")
 if ((with_test_user)); then
-  echo "test account: $test_user (no admin groups)" >&2
+  if [[ $server_disk == 1 ]]; then
+    echo "test account: $test_user (wheel, for the server probes)" >&2
+  else
+    echo "test account: $test_user (no admin groups)" >&2
+  fi
 fi
 
 # Pin the builder by digest so a moving :latest cannot change the disk output.
@@ -81,3 +103,21 @@ podman run --rm --privileged \
   "$bib_image" \
   build "$image" --type qcow2 --rootfs btrfs --use-librepo=True --output /output \
   --chown "${SUDO_UID:-0}:${SUDO_GID:-0}"
+
+# The server units are gated on /var/srv being a mountpoint, so the boot test
+# needs a second drive carrying the data label. A sparse file plus one ext4
+# filesystem costs only the metadata; the guest fills the rest at runtime.
+if [[ $server_disk == 1 ]]; then
+  data_disk=$out/qcow2/data.qcow2
+  rm -f "$data_disk"
+  truncate -s 8G "$data_disk"
+  mkfs.ext4 -q -F -L ultus-data "$data_disk"
+  chown "${SUDO_UID:-0}:${SUDO_GID:-0}" "$data_disk"
+  label=$(blkid -p -o value -s LABEL "$data_disk")
+  fstype=$(blkid -p -o value -s TYPE "$data_disk")
+  echo "data disk: $data_disk (label=$label type=$fstype)" >&2
+  if [[ $label != ultus-data || $fstype != ext4 ]]; then
+    echo "data disk is not ext4 labelled ultus-data" >&2
+    exit 1
+  fi
+fi
