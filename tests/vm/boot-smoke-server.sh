@@ -242,13 +242,21 @@ fi
 prime_sudo
 # Same working-directory reason as the first stage: the container query runs as
 # `agents` and cannot start from the test account's 0700 home.
+# The premise first: /var/srv is not a mountpoint at all here, so a unit that
+# stayed down did so for the right reason.
+probe 'ULTUS_NODISK_MOUNT:(absent|present)' 60 'mountpoint -q /var/srv && printf "ULTUS_NODISK_MOUNT:%s\n" present || printf "ULTUS_NODISK_MOUNT:%s\n" absent'
+# An inactive unit could also be a unit that crashed. RequiresMountsFor= adds an
+# implicit mount condition, and systemd reports ConditionResult=no when it
+# refused the start because the mount was missing. That is the gate, not the
+# absence of a crash.
+probe 'ULTUS_NODISK_CONDITION:(yes|no)' 60 'test "$(systemctl show opencode.service -p ConditionResult --value)" = no && test "$(systemctl show hermes.service -p ConditionResult --value)" = no && printf "ULTUS_NODISK_CONDITION:%s\n" no || printf "ULTUS_NODISK_CONDITION:%s\n" yes'
 probe 'ULTUS_NODISK_OPENCODE:(active|inactive)' 60 'cd /var/tmp || exit 1; systemctl is-active --quiet opencode.service && printf "ULTUS_NODISK_OPENCODE:%s\n" active || printf "ULTUS_NODISK_OPENCODE:%s\n" inactive'
 probe 'ULTUS_NODISK_HERMES:(active|inactive)' 60 'systemctl is-active --quiet hermes.service && printf "ULTUS_NODISK_HERMES:%s\n" active || printf "ULTUS_NODISK_HERMES:%s\n" inactive'
 probe 'ULTUS_NODISK_CONTAINER:(present|absent)' "$timeout_s" 'containers=$(sudo -u agents env HOME=/var/lib/agents XDG_RUNTIME_DIR=/run/user/1000 podman ps -a --format "{{.Names}}" 2>/dev/null || true); case "$containers" in *opencode*|*hermes*) printf "ULTUS_NODISK_CONTAINER:%s\n" present ;; *) printf "ULTUS_NODISK_CONTAINER:%s\n" absent ;; esac'
 probe 'ULTUS_NODISK_TREE:(present|absent)' 60 'test -e /var/srv/ultus && printf "ULTUS_NODISK_TREE:%s\n" present || printf "ULTUS_NODISK_TREE:%s\n" absent'
 probe 'ULTUS_NODISK_END:ok' 60 'printf "ULTUS_NODISK_END:%s\n" ok'
 
-for marker in 'ULTUS_NODISK_OPENCODE:inactive' 'ULTUS_NODISK_HERMES:inactive' 'ULTUS_NODISK_CONTAINER:absent' 'ULTUS_NODISK_TREE:absent'; do
+for marker in 'ULTUS_NODISK_MOUNT:absent' 'ULTUS_NODISK_CONDITION:no' 'ULTUS_NODISK_OPENCODE:inactive' 'ULTUS_NODISK_HERMES:inactive' 'ULTUS_NODISK_CONTAINER:absent' 'ULTUS_NODISK_TREE:absent'; do
   if ! grep -qF "$marker" "$log"; then
     echo "boot failed without a data disk: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true

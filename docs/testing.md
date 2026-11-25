@@ -159,7 +159,7 @@ The server boot test is not a gate on its own; CI runs it inside `image-server`.
 | `ULTUS_BACKUP:0` | The backup unit exits 0, so a window really wrote a snapshot |
 | `ULTUS_RESTORE:ok` | The snapshot restores a canary file, so the repository holds the tree rather than an empty mount |
 | `ULTUS_REBOOT_MARKER:ok`, `ULTUS_REBOOT_ACTIVE:ok` | The data disk and both workloads survive a guest reboot |
-| `ULTUS_NODISK_*` | With no data drive, neither workload starts, no container is left behind, and `/var/srv/ultus` is not created on the OS disk |
+| `ULTUS_NODISK_*` | With no data drive, `/var/srv` is not a mountpoint, systemd refused both workload starts (`ConditionResult=no`, not a crash), no container is left behind, and `/var/srv/ultus` is not created on the OS disk |
 
 It builds its own disk inputs:
 

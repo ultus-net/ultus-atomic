@@ -367,11 +367,16 @@ if ((server)); then
   echo "ok   the stock update only downloads; the window applies"
 
   # LLMNR and mDNS answer on every interface, and the boot test walks the live
-  # listener list. Read the drop-in here so a deleted file reds before the boot.
-  if ! "$runtime" run --rm "$image" bash -lc \
-      'grep -qx "LLMNR=no" /usr/lib/systemd/resolved.conf.d/10-no-lan-discovery.conf &&
-       grep -qx "MulticastDNS=no" /usr/lib/systemd/resolved.conf.d/10-no-lan-discovery.conf'; then
-    echo "FAIL the LAN discovery drop-in is missing or still enables LLMNR or mDNS" >&2
+  # listener list. Read the merged config, not only the drop-in: a later file
+  # with a higher priority could turn discovery back on, and resolved reads the
+  # last assignment of each key.
+  if ! "$runtime" run --rm "$image" bash -lc '
+      merged=$(systemd-analyze cat-config systemd/resolved.conf) || exit 1
+      llmnr=$(printf "%s\n" "$merged" | grep -E "^[[:space:]]*LLMNR=" | tail -1)
+      mdns=$(printf "%s\n" "$merged" | grep -E "^[[:space:]]*MulticastDNS=" | tail -1)
+      [[ ${llmnr// /} == "LLMNR=no" && ${mdns// /} == "MulticastDNS=no" ]]
+    '; then
+    echo "FAIL the effective resolved config still enables LLMNR or mDNS" >&2
     exit 1
   fi
   echo "ok   the server answers no LLMNR or mDNS on the LAN"
