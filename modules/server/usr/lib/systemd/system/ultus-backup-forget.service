@@ -7,5 +7,9 @@ After=ultus-backup.service
 
 [Service]
 Type=oneshot
+# The same cache rule as ultus-backup.service: without a cache directory restic
+# exits before it can apply the policy.
+StateDirectory=ultus/restic-cache
+Environment=RESTIC_CACHE_DIR=/var/lib/ultus/restic-cache
 ExecStart=/usr/libexec/ultus/ultus-backup forget
 TimeoutStartSec=3600

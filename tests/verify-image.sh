@@ -365,6 +365,16 @@ if ((server)); then
     exit 1
   fi
   echo "ok   the stock update only downloads; the window applies"
+
+  # LLMNR and mDNS answer on every interface, and the boot test walks the live
+  # listener list. Read the drop-in here so a deleted file reds before the boot.
+  if ! "$runtime" run --rm "$image" bash -lc \
+      'grep -qx "LLMNR=no" /usr/lib/systemd/resolved.conf.d/10-no-lan-discovery.conf &&
+       grep -qx "MulticastDNS=no" /usr/lib/systemd/resolved.conf.d/10-no-lan-discovery.conf'; then
+    echo "FAIL the LAN discovery drop-in is missing or still enables LLMNR or mDNS" >&2
+    exit 1
+  fi
+  echo "ok   the server answers no LLMNR or mDNS on the LAN"
 fi
 # The lock records every package whose origin repository is not a Fedora
 # repository. The comparison is a post-build drift gate: the build installs

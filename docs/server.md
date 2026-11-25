@@ -85,7 +85,7 @@ A new surface is three things in one commit: the workload publishes on `127.0.0.
 | `opencode.service` | `/var/srv/repos`, `/var/srv/opencode/{share,config,state}` | `4096` | `ghcr.io/ultus-net/devbox@sha256:8649976d…` |
 | `hermes.service` | `/var/srv/hermes/data` | `8642`, `9119` | `docker.io/nousresearch/hermes-agent@sha256:41468459…` |
 
-Both run as `agents` with `--userns=keep-id`, a read-only root filesystem, `--cap-drop=all`, `no-new-privileges`, and one loopback publish per port. The tailnet is the only route in, so a `0.0.0.0` publish is a second door that no test permits.
+Both run as `agents` with `--userns=keep-id`, a read-only root filesystem, `--cap-drop=all`, `no-new-privileges`, and one loopback publish per port. The tailnet is the only route in, so a `0.0.0.0` publish is a second door that no test permits. The same rule covers the base OS: `resolved.conf.d/10-no-lan-discovery.conf` sets `LLMNR=no` and `MulticastDNS=no`, because both answer on every interface and neither appears in a unit scan.
 
 Each image reference is a build-time default in its unit. To move a digest without rebuilding, write `/var/srv/ultus/workloads.env` as root with `OPENCODE_IMAGE=` or `HERMES_IMAGE=`; the unit reads that file after the derived env file, so the override wins. The file is on the data disk, and only root can write it.
 
@@ -125,7 +125,7 @@ The nightly backup runs at 02:30 with the workloads stopped, so restic reads a q
 
 Both timers are `Persistent=true`, so a window missed while the box was off runs on the next boot. The backup covers `/var/srv/ultus`, `/var/srv/opencode`, `/var/srv/hermes` and `/var/srv/repos`. The secrets file is inside the backup on purpose: the repository is the only way to rebuild after a disk failure.
 
-Credentials live in `/var/srv/ultus/backup.env`, mode `0600` owned `root:root`. The units carry no `EnvironmentFile=`, because systemd publishes a unit's environment to any user through `systemctl show`. `ultus-backup` parses the file itself, exports only the `RESTIC_`, `AWS_` and `B2_` key prefixes, and checks the mode before it reads.
+Credentials live in `/var/srv/ultus/backup.env`, mode `0600` owned `root:root`. The units carry no `EnvironmentFile=`, because systemd publishes a unit's environment to any user through `systemctl show`. `ultus-backup` parses the file itself, exports only the `RESTIC_`, `AWS_` and `B2_` key prefixes, and checks the mode before it reads. Both units do set `RESTIC_CACHE_DIR=/var/lib/ultus/restic-cache`, because restic 0.19 derives a cache path from `HOME` and a unit has none; `StateDirectory=` creates it.
 
 | Key | Required | Meaning |
 | --- | --- | --- |
@@ -140,6 +140,14 @@ A run by hand takes the same path:
 sudo /usr/libexec/ultus/ultus-backup
 sudo /usr/libexec/ultus/ultus-backup forget
 ```
+
+An empty repository is not a backup target: restic refuses to write into one until it has a config. Create the repository once, before the first window, with the same two variables the units read:
+
+```bash
+sudo RESTIC_REPOSITORY=<url> RESTIC_PASSWORD_FILE=/var/srv/ultus/restic-password restic init
+```
+
+Until that runs, every window fails and the timer retries it the next day. That is deliberate: a unit that silently created a repository could point at the wrong bucket and look healthy.
 
 Retention is automatic. `--keep-*` bounds what `forget` can delete, and `ultus-backup-forget.timer` prunes only weekly, so a wrong policy surfaces in `restic snapshots` before a month of history is gone. To take retention back into your hands, disable the timer:
 

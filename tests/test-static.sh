@@ -181,6 +181,10 @@ elif ! grep -qF -- '--keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune' "$b
 elif ! grep -qE '^ExecStopPost=-?/usr/bin/systemctl start opencode\.service hermes\.service$' "$backup_unit"; then
   echo "FAIL ultus-backup.service does not restart the workloads after a failed or finished backup" >&2
   failures=$((failures + 1))
+elif ! grep -qx 'Environment=RESTIC_CACHE_DIR=/var/lib/ultus/restic-cache' "$backup_unit" ||
+     ! grep -qx 'Environment=RESTIC_CACHE_DIR=/var/lib/ultus/restic-cache' "$server_units/ultus-backup-forget.service"; then
+  echo "FAIL a restic unit sets no cache directory, so restic exits before it reads the repository" >&2
+  failures=$((failures + 1))
 elif ! grep -qF 'bootc upgrade --download-only --quiet' "$dropin" ||
      ! grep -qx 'ExecStart=' "$dropin"; then
   echo "FAIL the drop-in does not replace the stock update command with --download-only" >&2
