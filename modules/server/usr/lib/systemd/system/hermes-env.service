@@ -1,0 +1,13 @@
+[Unit]
+Description=Derive the Hermes environment from the data-disk secrets
+RequiresMountsFor=/var/srv
+After=ultus-data-prepare.service var-srv.mount
+Before=hermes.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/ultus/ultus-env hermes
+
+[Install]
+WantedBy=multi-user.target

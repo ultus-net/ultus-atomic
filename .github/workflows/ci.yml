@@ -119,8 +119,11 @@ jobs:
           set -euo pipefail
           event="${{ github.event_name }}"
           # Every path the server build reads: its Containerfile, both role
-          # manifests, the shared build trees and the role-aware verifier.
-          regex='^(Containerfile$|Containerfile\.server$|build/|overlay/|modules/|manifests/packages-(common|desktop|server)[.]txt$|manifests/packages-server[.]lock$|tests/verify-image[.]sh$)'
+          # manifests, the shared build trees, the role-aware verifier, the two
+          # server test scripts, the server fixtures and the VM harness the boot
+          # step runs. The fixture path is a prefix so a desktop fixture edit
+          # does not rebuild the server image.
+          regex='^(Containerfile$|Containerfile\.server$|build/|overlay/|modules/|manifests/packages-(common|desktop|server)[.]txt$|manifests/packages-server[.]lock$|tests/verify-image[.]sh$|tests/test-server-isolation[.]sh$|tests/test-server-env[.]sh$|tests/fixtures/server-|tests/vm/)'
           matched=false
           if [[ "$event" == 'pull_request' ]]; then
             if git diff --name-only "${{ github.event.pull_request.base.sha }}...HEAD" | grep -Eq "$regex"; then
@@ -335,7 +338,10 @@ jobs:
     needs: [static, changes]
     if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # The boot test starts the guest three times: once with the data disk, once
+    # after a reboot inside that run, and once without the data disk. 240
+    # minutes bounds that; the desktop job needs 180 for a single boot.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -351,13 +357,48 @@ jobs:
           swap-storage: true
 
       - name: Install podman
-        run: build/install-packages.sh podman
+        run: build/install-packages.sh podman qemu-system-x86 qemu-utils ovmf
 
       - name: Build the server image
         run: podman build --layers -f Containerfile.server -t localhost/ultus-atomic-server:ci .
 
       - name: Verify the server image
         run: tests/verify-image.sh --server localhost/ultus-atomic-server:ci
+
+      - name: Build the server disk with a data disk
+        run: |
+          mkdir -p .cache
+          podman save localhost/ultus-atomic-server:ci -o .cache/server-image.tar
+          sudo podman load -i .cache/server-image.tar
+          sudo SERVER_DISK=1 tests/vm/make-disk.sh localhost/ultus-atomic-server:ci "$GITHUB_WORKSPACE/output"
+
+      - name: Server boot smoke test
+        # TCG on a hosted runner, and this test boots the guest twice: a reboot
+        # inside the first run, then a second run with no data drive. The
+        # workload units pull their two images from the guest, so the job needs
+        # outbound HTTPS to ghcr.io and docker.io; a runner without it fails at
+        # the pull, and the diagnostics name the pull error.
+        env:
+          BOOT_TIMEOUT: '2700'
+          QEMU_ACCEL: tcg
+          QEMU_NO_REBOOT: '0'
+          SERVER_DATA_DISK: ${{ github.workspace }}/output/qcow2/data.qcow2
+        run: |
+          sudo -E tests/vm/boot-smoke-server.sh \
+            "$GITHUB_WORKSPACE/output/qcow2/disk.qcow2" \
+            "$GITHUB_WORKSPACE/.vm/server-boot.log"
+
+      - name: Upload server boot evidence
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-boot-evidence
+          path: |
+            .vm/server-boot.log
+            .vm/server-boot-nodisk.log
+            .vm/qemu.err
+          retention-days: 14
+          if-no-files-found: ignore
 
   # The desktop is a module (#129). Build the tree with the module deleted, so a
   # change that puts a desktop path back into the shared build reds here instead

@@ -1,0 +1,20 @@
+[Unit]
+Description=Quiesced backup of the ultus data disk
+RequiresMountsFor=/var/srv
+ConditionPathIsMountPoint=/var/srv
+After=var-srv.mount
+
+[Service]
+Type=oneshot
+# No EnvironmentFile=: the credentials would become readable through
+# `systemctl show`. ultus-backup reads the same file itself, mode 0600 root.
+# restic 0.19 derives its cache from HOME, and a unit has none, so it exits
+# with "unable to open cache". StateDirectory= creates the path the unit writes.
+StateDirectory=ultus/restic-cache
+Environment=RESTIC_CACHE_DIR=/var/lib/ultus/restic-cache
+# The workloads must not be writing while restic reads. ExecStopPost starts them
+# again on every exit path, so a failed backup never leaves the box down.
+ExecStartPre=/usr/bin/systemctl stop opencode.service hermes.service
+ExecStart=/usr/libexec/ultus/ultus-backup
+ExecStopPost=-/usr/bin/systemctl start opencode.service hermes.service
+TimeoutStartSec=3600

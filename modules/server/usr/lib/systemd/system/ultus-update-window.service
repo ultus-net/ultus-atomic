@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply a downloaded deployment inside the maintenance window
+RequiresMountsFor=/var/srv
+After=var-srv.mount bootc-fetch-apply-updates.service
+ConditionPathExists=/run/ostree-booted
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/ultus/ultus-update-window
+TimeoutStartSec=1800

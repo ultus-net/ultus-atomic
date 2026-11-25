@@ -47,9 +47,19 @@ bash_scripts=(
   tests/verify-headless.sh
   tests/verify-kernel-signature.sh
   tests/vm/boot-smoke.sh
+  tests/vm/boot-smoke-server.sh
+  tests/vm/lib/qemu.sh
   tests/vm/make-disk.sh
   modules/desktop/usr/libexec/ultus-atomic/build.d/50-desktop.sh
   modules/server/usr/libexec/ultus-atomic/build.d/50-server.sh
+  modules/server/usr/libexec/ultus/ultus-data-prepare
+  modules/server/usr/libexec/ultus/ultus-env
+  modules/server/usr/libexec/ultus/ultus-tailnet
+  modules/server/usr/libexec/ultus/ultus-health
+  modules/server/usr/libexec/ultus/ultus-backup
+  modules/server/usr/libexec/ultus/ultus-update-window
+  tests/test-server-env.sh
+  tests/test-server-isolation.sh
 )
 posix_scripts=(
   modules/desktop/usr/libexec/ultus-atomic/needs-setup.sh

@@ -138,9 +138,42 @@ tests/test-signing.sh
 
 | Gate | What it asserts |
 | --- | --- |
-| `tests/verify-image.sh --server` | No desktop package is installed; `var-srv.mount` is present and enabled; `tailscale` and `restic` are installed; no Flathub remote is seeded; and the third-party set matches `manifests/packages-server.lock`. |
+| `tests/verify-image.sh --server` | No desktop package is installed; `var-srv.mount` is present and enabled; `tailscale` and `restic` are installed; the `agents` user has uid and gid 1000, one `100000:65536` subordinate range in each of `/etc/subuid` and `/etc/subgid`, and the linger flag; every unit this part ships is enabled; every unit passes `systemd-analyze verify`; the download-only drop-in replaces bootc's stock update command; no Flathub remote is seeded; and the third-party set matches `manifests/packages-server.lock`. |
+| `tests/test-server-env.sh` | Runs `ultus-env` in the pinned base against two fixture secrets files: each derived file is `0600 agents:agents`, the OpenCode file carries no Hermes key, each Hermes key is present, and a missing required key fails closed. It needs podman or docker and pulls the base image the `Containerfile` pins. |
+| `tests/test-server-isolation.sh` | Parses every unit in `modules/server/usr/lib/systemd/system/` and rejects `--privileged`, host namespaces, `--cap-add`, `--device`, `label=disable`, a host home or root home mount, a Podman or Docker socket, and any publish without `127.0.0.1`. It first runs against `tests/fixtures/server-units/widened.service`, which carries every rejected spelling, so a parser that stops matching reds here instead of passing quietly. |
 
-The server VM slice is a later part.
+The server boot test is not a gate on its own; CI runs it inside `image-server`.
+
+## Server boot test
+
+`tests/vm/boot-smoke-server.sh` boots the server image with a second disk labelled `ultus-data` and asserts the role end to end, from the guest's own console:
+
+| Marker | Asserts |
+| --- | --- |
+| `ULTUS_MOUNT:ok` | `/var/srv` is a mountpoint |
+| `ULTUS_LINGER:yes` | `agents` lingers, so rootless Podman has a runtime directory |
+| `ULTUS_OWNER:1000` | A container's write under `/var/srv/opencode/share` lands owned by `agents`, not root |
+| no `ULTUS_CANARY:*:readable` | A workload container cannot read `/home/<test account>`, `/root/.ssh`, the Podman socket or `/dev/kvm` |
+| `ULTUS_LISTEN:loopback` | Every listener is on loopback (`127.0.0.0/8` or `::1`) |
+| `ULTUS_REPO:ok` | The one-time `restic init` succeeds, so the backup unit has a repository to write into |
+| `ULTUS_BACKUP:0` | The backup unit exits 0, so a window really wrote a snapshot |
+| `ULTUS_RESTORE:ok` | The snapshot restores a canary file, so the repository holds the tree rather than an empty mount |
+| `ULTUS_REBOOT_MARKER:ok`, `ULTUS_REBOOT_ACTIVE:ok` | The data disk and both workloads survive a guest reboot |
+| `ULTUS_NODISK_*` | With no data drive, `/var/srv` is not a mountpoint, systemd refused both workload starts (`ConditionResult=no`, not a crash), no container is left behind, and `/var/srv/ultus` is not created on the OS disk |
+
+It builds its own disk inputs:
+
+```bash
+sudo SERVER_DISK=1 tests/vm/make-disk.sh localhost/ultus-atomic-server:dev
+SERVER_DATA_DISK=$PWD/output/qcow2/data.qcow2 QEMU_NO_REBOOT=0 \
+  sudo -E tests/vm/boot-smoke-server.sh output/qcow2/disk.qcow2 .vm/server-boot.log
+```
+
+`SERVER_DISK=1` adds the test account to `wheel`, because the probes drive system units, and writes `output/qcow2/data.qcow2`: a sparse 8 GiB file carrying an ext4 filesystem labelled `ultus-data`. It refuses to run with `NO_TEST_USER=1`.
+
+`QEMU_NO_REBOOT=0` is required: the script reboots the guest and logs in again, and QEMU must survive that. The snapshot stays on, so the guest's writes survive the reboot inside the run and the source disk is untouched. The script then starts a second QEMU with no data drive, which is the failed-mount case.
+
+The test boots the guest three times: with the data disk, after a reboot inside that run, and with no data disk. It pulls both workload images from inside the guest, so it needs outbound HTTPS to `ghcr.io` and `docker.io` and a larger budget than the desktop boot. On a host without `/dev/kvm`, set `BOOT_TIMEOUT=2700`.
 
 ## CI boot test
 

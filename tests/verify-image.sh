@@ -328,6 +328,58 @@ if ((server)); then
     exit 1
   fi
   echo "ok   the server image carries no desktop package and has an enabled data-disk mount unit"
+
+  # The rootless workloads need the account, both subordinate ranges and the
+  # linger flag; without any one of the three rootless podman cannot map a uid.
+  "$runtime" run --rm "$image" bash -lc '
+    getent passwd agents | grep -q ":1000:1000:" &&
+    grep -qx "agents:100000:65536" /etc/subuid &&
+    grep -qx "agents:100000:65536" /etc/subgid &&
+    test -f /var/lib/systemd/linger/agents
+  ' || { echo "FAIL the server image lacks the agents user, ranges, or linger flag" >&2; exit 1; }
+
+  # Every unit this part ships must be installed and enabled. A unit disabled by
+  # a preset is a server that boots without its role.
+  server_units='ultus-data-prepare.service ultus-network.service ultus-tailnet.service
+    opencode-env.service hermes-env.service opencode.service hermes.service
+    ultus-health.timer ultus-backup.timer ultus-backup-forget.timer
+    ultus-update-window.timer'
+  for unit in $server_units; do
+    "$runtime" run --rm "$image" systemctl is-enabled "$unit" | grep -qx enabled \
+      || { echo "FAIL ${unit} is not enabled in the server image" >&2; exit 1; }
+  done
+  echo "ok   every server unit is enabled"
+
+  "$runtime" run --rm "$image" bash -lc \
+    'systemd-analyze verify /usr/lib/systemd/system/ultus-*.service \
+       /usr/lib/systemd/system/ultus-*.timer /usr/lib/systemd/system/opencode.service \
+       /usr/lib/systemd/system/hermes.service' \
+    || { echo "FAIL a server unit does not pass systemd-analyze verify" >&2; exit 1; }
+  echo "ok   every server unit passes systemd-analyze verify"
+
+  # The drop-in does not rewrite the vendored unit, so read the drop-in itself.
+  if ! "$runtime" run --rm "$image" grep -qx \
+      'ExecStart=/usr/bin/bootc upgrade --download-only --quiet' \
+      /usr/lib/systemd/system/bootc-fetch-apply-updates.service.d/download-only.conf; then
+    echo "FAIL the download-only drop-in is missing or names the wrong command" >&2
+    exit 1
+  fi
+  echo "ok   the stock update only downloads; the window applies"
+
+  # LLMNR and mDNS answer on every interface, and the boot test walks the live
+  # listener list. Read the merged config, not only the drop-in: a later file
+  # with a higher priority could turn discovery back on, and resolved reads the
+  # last assignment of each key.
+  if ! "$runtime" run --rm "$image" bash -lc '
+      merged=$(systemd-analyze cat-config systemd/resolved.conf) || exit 1
+      llmnr=$(printf "%s\n" "$merged" | grep -E "^[[:space:]]*LLMNR=" | tail -1)
+      mdns=$(printf "%s\n" "$merged" | grep -E "^[[:space:]]*MulticastDNS=" | tail -1)
+      [[ ${llmnr// /} == "LLMNR=no" && ${mdns// /} == "MulticastDNS=no" ]]
+    '; then
+    echo "FAIL the effective resolved config still enables LLMNR or mDNS" >&2
+    exit 1
+  fi
+  echo "ok   the server answers no LLMNR or mDNS on the LAN"
 fi
 # The lock records every package whose origin repository is not a Fedora
 # repository. The comparison is a post-build drift gate: the build installs

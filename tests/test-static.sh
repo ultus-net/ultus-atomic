@@ -98,6 +98,107 @@ else
   echo "ok   the base names tailscale and no desktop package, and the server names restic"
 fi
 
+# The server runs its agents as a dedicated rootless user. A missing linger flag
+# means no runtime directory, so rootless Podman cannot start; a missing range
+# means containers cannot map their own users. Both are silent at build time, so
+# name them here.
+server_hook=$repo_root/modules/server/usr/libexec/ultus-atomic/build.d/50-server.sh
+prepare_unit=$repo_root/modules/server/usr/lib/systemd/system/ultus-data-prepare.service
+if ! grep -qF 'useradd -u 1000 -g agents' "$server_hook"; then
+  echo "FAIL the server hook does not create the agents user with uid 1000" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'var/lib/systemd/linger/agents' "$server_hook"; then
+  echo "FAIL the server hook does not write the linger flag, so rootless podman cannot start" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'usermod --add-subuids 100000-165535 --add-subgids 100000-165535 agents' "$server_hook"; then
+  echo "FAIL the server hook does not give agents a subordinate range" >&2
+  failures=$((failures + 1))
+elif ! grep -qF -- '-K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0' "$server_hook"; then
+  echo "FAIL useradd keeps login.defs subuid allocation, so agents gets two ranges" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'ConditionPathIsMountPoint=/var/srv' "$prepare_unit"; then
+  echo "FAIL ultus-data-prepare.service does not refuse an unmounted /var/srv" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   the server hook creates agents with a range and linger, and the prepare unit refuses an unmounted disk"
+fi
+
+for pair in 'opencode-env.service:opencode' 'hermes-env.service:hermes'; do
+  unit=${pair%%:*}
+  role=${pair##*:}
+  if ! grep -qF "/usr/libexec/ultus/ultus-env ${role}" \
+      "$repo_root/modules/server/usr/lib/systemd/system/${unit}"; then
+    echo "FAIL ${unit} does not derive the ${role} environment" >&2
+    failures=$((failures + 1))
+  else
+    echo "ok   ${unit} derives the ${role} environment"
+  fi
+done
+
+tailnet_unit=$repo_root/modules/server/usr/lib/systemd/system/ultus-tailnet.service
+tailnet_script=$repo_root/modules/server/usr/libexec/ultus/ultus-tailnet
+missing_surfaces=()
+for surface in '--https=443 http://127.0.0.1:4096' \
+               '--https=8443 http://127.0.0.1:9119' \
+               '--https=10000 http://127.0.0.1:8642'; do
+  # The pattern starts with --, so grep needs its own end-of-options marker.
+  grep -qF -- "$surface" "$tailnet_script" || missing_surfaces+=("$surface")
+done
+if ((${#missing_surfaces[@]} > 0)); then
+  echo "FAIL the tailnet script does not publish: ${missing_surfaces[*]}" >&2
+  failures=$((failures + 1))
+elif ! grep -qx 'hostname=ultus-server' "$tailnet_script"; then
+  echo "FAIL the tailnet script does not join as ultus-server" >&2
+  failures=$((failures + 1))
+elif ! grep -qF -- '--hostname="$hostname"' "$tailnet_script"; then
+  echo "FAIL the tailnet join does not pass the host name" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'RequiresMountsFor=/var/srv' "$tailnet_unit"; then
+  echo "FAIL ultus-tailnet.service can run before the data disk is mounted" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   the tailnet script publishes three loopback surfaces as ultus-server"
+fi
+
+# The backup's whole point is the data disk, and /var/srv is a plain directory on
+# the OS disk when the mount fails. A backup of that stores an empty tree that
+# restores as a wiped box, so the unit must refuse it. The credentials stay out
+# of systemd's unit environment: `systemctl show` publishes that to any user.
+server_units=$repo_root/modules/server/usr/lib/systemd/system
+backup_unit=$server_units/ultus-backup.service
+backup_script=$repo_root/modules/server/usr/libexec/ultus/ultus-backup
+window_script=$repo_root/modules/server/usr/libexec/ultus/ultus-update-window
+dropin=$server_units/bootc-fetch-apply-updates.service.d/download-only.conf
+if ! grep -qF 'ConditionPathIsMountPoint=/var/srv' "$backup_unit"; then
+  echo "FAIL ultus-backup.service would back up an unmounted /var/srv" >&2
+  failures=$((failures + 1))
+elif grep -qE '^EnvironmentFile=' "$backup_unit" "$server_units/ultus-backup-forget.service"; then
+  echo "FAIL a backup unit puts the repository credentials in systemd's unit environment" >&2
+  failures=$((failures + 1))
+elif ! grep -qF -- '--keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune' "$backup_script"; then
+  echo "FAIL ultus-backup does not apply the operator's retention policy" >&2
+  failures=$((failures + 1))
+elif ! grep -qE '^ExecStopPost=-?/usr/bin/systemctl start opencode\.service hermes\.service$' "$backup_unit"; then
+  echo "FAIL ultus-backup.service does not restart the workloads after a failed or finished backup" >&2
+  failures=$((failures + 1))
+elif ! grep -qx 'Environment=RESTIC_CACHE_DIR=/var/lib/ultus/restic-cache' "$backup_unit" ||
+     ! grep -qx 'Environment=RESTIC_CACHE_DIR=/var/lib/ultus/restic-cache' "$server_units/ultus-backup-forget.service"; then
+  echo "FAIL a restic unit sets no cache directory, so restic exits before it reads the repository" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'bootc upgrade --download-only --quiet' "$dropin" ||
+     ! grep -qx 'ExecStart=' "$dropin"; then
+  echo "FAIL the drop-in does not replace the stock update command with --download-only" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'bootc upgrade --from-downloaded --apply' "$window_script"; then
+  echo "FAIL the window does not apply the staged deployment" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'systemctl start opencode.service hermes.service' "$window_script"; then
+  echo "FAIL the window does not restart the workloads when the apply fails" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   the backup refuses an unmounted disk, restarts the workloads, and the window applies only a staged deployment"
+fi
+
 # The NVIDIA variant installs a second manifest (#72). The shared image reads
 # only packages-common.txt, so the variant names its own file through
 # PACKAGE_MANIFEST_EXTRA. Losing either half of that wiring still builds an
@@ -584,12 +685,15 @@ fi
 # (#50). Run 43068532421 printed "fedora login: [ 275.126011] clocksource: ..."
 # and the old end-anchored pattern missed it, burning the whole login budget.
 boot_smoke=$repo_root/tests/vm/boot-smoke.sh
+# The serial helpers moved into the shared library, so the assertions that read
+# them read the library; the marker greps stay on the script that emits them.
+qemu_lib=$repo_root/tests/vm/lib/qemu.sh
 common=$repo_root/build/common.sh
 if ! grep -qF 'wait_for "DUX_USER:${test_user}"' "$boot_smoke" ||
    ! grep -qF "wait_for 'DUX_PROBE_END:ok'" "$boot_smoke" ||
    ! grep -qF "wait_for 'DUX_DIAG_END:ok'" "$boot_smoke" ||
-   ! grep -qF "wait_for '^[A-Za-z0-9._-]+ login: '" "$boot_smoke" ||
-   grep -qF "wait_for 'login: *\$'" "$boot_smoke" ||
+   ! grep -qF "wait_for '^[A-Za-z0-9._-]+ login: '" "$qemu_lib" ||
+   grep -qF "wait_for 'login: *\$'" "$qemu_lib" ||
    ! awk '
       # The operator chose to accept any window of 60s or more (#36), so a
       # later raise does not red the gate. The wait must still be the prompt
@@ -605,9 +709,9 @@ if ! grep -qF 'wait_for "DUX_USER:${test_user}"' "$boot_smoke" ||
       in_fn && /echo "login failed: no shell prompt for \$\{test_user\}" >&2/ { msg = 1 }
       msg && /return 1/ { ret = 1 }
       END { exit !(wait && msg && ret) }
-    ' "$boot_smoke" ||
+    ' "$qemu_lib" ||
    ! grep -qF 'DUX_SETUP_MARKER' "$boot_smoke" ||
-   grep -qE 'wait_for "\$\{test_user\}@" [0-9]+ \|\| true' "$boot_smoke" ||
+   grep -qE 'wait_for "\$\{test_user\}@" [0-9]+ \|\| true' "$qemu_lib" ||
    grep -qF "wait_for 'DUX_DIAG_END'" "$boot_smoke" ||
    grep -qF "wait_for 'DUX_PROBE_END'" "$boot_smoke"; then
   echo "FAIL boot-smoke waits on an echoed marker instead of printf output" >&2
@@ -643,11 +747,40 @@ else
   echo "ok   boot-smoke.sh keeps the opt-in POST_LOGIN_CMD hook fail-closed"
 fi
 
+# Fixtures pin normalize_log's contract (#162): the marker run 45553885679 split
+# is joined with the kernel text gone and no second match, while adjacent guest
+# lines and a marker inside a kernel message are not counted. Both matchers must
+# call the helper.
+server_boot=$repo_root/tests/vm/boot-smoke-server.sh
+split_log=$cond_root/console-split.log
+adjacent_log=$cond_root/console-adjacent.log
+kernel_log=$cond_root/console-kernel.log
+printf '%s\n' \
+  'ULTUS_NODISK_CON[  204.301924] audit: type=1105 audit(1.2:3): res=success' \
+  'TAINER:absent' >"$split_log"
+printf '%s\n' 'ULTUS_NODISK_CON' 'TAINER:absent' >"$adjacent_log"
+printf '%s\n' '[  204.301924] kernel: ULTUS_NODISK_CONTAINER:absent' >"$kernel_log"
+normalized() {
+  bash -c 'source "$1"; normalize_log <"$2"' _ "$qemu_lib" "$1"
+}
+split_out=$(normalized "$split_log")
+if [[ $split_out != 'ULTUS_NODISK_CONTAINER:absent' ]] ||
+   [[ $(normalized "$split_log" | grep -cF 'ULTUS_NODISK_CONTAINER:absent') != 1 ]] ||
+   [[ $(normalized "$adjacent_log") != $'ULTUS_NODISK_CON\nTAINER:absent' ]] ||
+   [[ -n $(normalized "$kernel_log") ]] ||
+   ! grep -qF 'normalize_log <"$log" | grep -cE' "$qemu_lib" ||
+   ! grep -qF '"$log" | normalize_log | grep -cE' "$server_boot"; then
+  echo "FAIL console normalization does not rejoin a split marker exactly, or overmatches one" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   a split console marker is joined exactly once, and nothing else is"
+fi
+
 # A hosted TCG boot reached the login prompt after 21 minutes in run 43068532421
 # (#50), so the login wait must consume BOOT_TIMEOUT and CI must budget for it.
 # Lowering either brings back a red release for a slow runner, not a broken image.
 ci_workflow=$repo_root/.github/workflows/ci.yml
-if ! grep -qF "login: ' \"\$timeout_s\"" "$boot_smoke" ||
+if ! grep -qF "login: ' \"\$timeout_s\"" "$qemu_lib" ||
    ! awk '
       # Scope to the boot step: a BOOT_TIMEOUT on another job or step must not
       # satisfy this. The env block follows the step name, and the next

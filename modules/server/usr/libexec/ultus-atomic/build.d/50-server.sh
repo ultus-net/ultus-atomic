@@ -15,3 +15,53 @@ enabled=$(systemctl is-enabled var-srv.mount || true)
   echo "var-srv.mount is not enabled (got: ${enabled:-nothing}); the data disk would not mount" >&2
   exit 1
 }
+
+# The workloads are rootless, so they run as a dedicated user. The uid is fixed
+# because container uid 1000 maps to it under --userns=keep-id, and a moved uid
+# would leave every state directory owned by nobody. The subordinate range is
+# what lets Podman map container users at all.
+groupadd -g 1000 agents
+# login.defs allocates a second range (524288) by default, which leaves the file
+# with two entries and makes which one Podman uses depend on line order. Take the
+# allocation out and add the one range the spec names.
+useradd -u 1000 -g agents -M -d /var/lib/agents -s /sbin/nologin \
+  -K SUB_UID_COUNT=0 -K SUB_GID_COUNT=0 \
+  -c "ultus agent workloads" agents
+usermod --add-subuids 100000-165535 --add-subgids 100000-165535 agents
+
+# loginctl enable-linger writes this file. The build runs with no systemd as PID
+# 1, so loginctl cannot reach a manager here; the file is the whole effect, and
+# systemd reads it on the first boot.
+install -d -m 0755 /var/lib/systemd/linger
+touch /var/lib/systemd/linger/agents
+chmod 0644 /var/lib/systemd/linger/agents
+
+# Every unit this module ships is enabled here and asserted in the same pass. A
+# unit that is installed but not enabled never runs, and the failure stays silent
+# until the first boot needs it.
+units=(
+  ultus-data-prepare.service
+  opencode-env.service
+  hermes-env.service
+  ultus-network.service
+  opencode.service
+  hermes.service
+  ultus-tailnet.service
+  # The health, backup and window services carry no [Install] section, so
+  # `systemctl is-enabled` reports them static. Their timers are the only thing
+  # that starts them, and the timers are what is enabled here.
+  ultus-health.timer
+  ultus-backup.timer
+  ultus-backup-forget.timer
+  ultus-update-window.timer
+)
+systemctl enable "${units[@]}"
+# bootc's own timer is enabled by its package and is not ours to enable; it is
+# asserted here because the drop-in only takes effect while it runs.
+for unit in "${units[@]}" bootc-fetch-apply-updates.timer; do
+  enabled=$(systemctl is-enabled "$unit" || true)
+  [[ $enabled == enabled ]] || {
+    echo "$unit is not enabled (got: ${enabled:-nothing}); it would never run on the host" >&2
+    exit 1
+  }
+done

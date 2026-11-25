@@ -1,0 +1,15 @@
+[Unit]
+Description=Prepare the ultus data-disk subtree
+Documentation=file:///usr/libexec/ultus/ultus-data-prepare
+RequiresMountsFor=/var/srv
+ConditionPathIsMountPoint=/var/srv
+After=var-srv.mount
+Before=opencode-env.service hermes-env.service ultus-network.service ultus-tailnet.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/ultus/ultus-data-prepare
+
+[Install]
+WantedBy=multi-user.target
