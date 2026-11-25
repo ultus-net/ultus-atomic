@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refresh the third-party package lock after the duxlabs COPR rebuilt `dux-qt-base-git` from `0.4.73^962.git75d4524` to `0.4.74^967.git1f768a3` (#162). Run 45553885679 failed the `image` job on that drift, and the printed diff names `manifests/packages-common.lock:14` as the entire difference. No manifest, build step or image behaviour changes.
+
 - Rewrite the README for what the repo is now: one tree, two Fedora bootc roles. It states the desktop and server split in one table (build file, extra manifest, module, what each ships, accounts, image gate), then what the pair is for: one drive per host, agents never on the host, one route in over the tailnet, and updates inside a window. The status table gains rows for the server image and the tailnet, and the first-login screenshot is removed because one role is now a headless host with no desktop to show. The GitHub description changes to name both images.
 
 - Fix the backup unit the boot test found failing. `ultus-backup.service` and `ultus-backup-forget.service` now create `/var/lib/ultus/restic-cache` with `StateDirectory=` and set `RESTIC_CACHE_DIR`, because restic 0.19 derives its cache from `HOME` and a systemd unit has none. Without it the unit exited 1 with `unable to open cache: unable to locate cache directory`, so no backup ever ran (#152).
