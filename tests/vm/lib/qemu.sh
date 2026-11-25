@@ -145,11 +145,19 @@ vm_cleanup() {
   fi
 }
 
+# A kernel console message can land in the middle of a line the guest is
+# writing, splitting a marker across two physical lines. Drop those messages
+# and the newline that ends them, so the halves rejoin before a match. A
+# caller that prints diagnostics still reads the raw log.
+normalize_log() {
+  sed -z -E 's/\[[[:space:]]*[0-9]+\.[0-9]+\][^\n]*\n?//g'
+}
+
 wait_for() {
   local pattern=$1 deadline=$((SECONDS + $2))
   while ((SECONDS < deadline)); do
     # systemd colors the unit name, so allow bytes between the words.
-    if [[ -f $log ]] && grep -qE "$pattern" "$log"; then
+    if [[ -f $log ]] && normalize_log <"$log" | grep -cE "$pattern" >/dev/null; then
       return 0
     fi
     if ! kill -0 "$pid" 2>/dev/null; then

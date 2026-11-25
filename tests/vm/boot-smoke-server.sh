@@ -49,9 +49,10 @@ wait_for_new() {
   local pattern=$1 deadline=$((SECONDS + $2))
   while ((SECONDS < deadline)); do
     # grep -c, not -q: -q exits at the first match, and `set -o pipefail` then
-    # reports tail's SIGPIPE as the pipeline status. A match early in a long
-    # tail, like the login shell prompt after the reboot, would read as absent.
-    if [[ -f $log ]] && tail -n "+$((log_mark + 1))" "$log" | grep -cE "$pattern" >/dev/null; then
+    # reports the upstream command's SIGPIPE as the pipeline status. A match
+    # early in a long tail, like the login shell prompt after the reboot,
+    # would read as absent.
+    if [[ -f $log ]] && tail -n "+$((log_mark + 1))" "$log" | normalize_log | grep -cE "$pattern" >/dev/null; then
       return 0
     fi
     if ! kill -0 "$pid" 2>/dev/null; then
@@ -136,7 +137,7 @@ probe 'ULTUS_LISTEN:(wide|loopback)' 60 'ss -ltnH | awk "{print \$4}" | grep -vE
 probe 'ULTUS_PROBE_END:ok' 60 'printf "ULTUS_PROBE_END:%s\n" ok'
 
 for marker in 'ULTUS_CWD:ok' 'ULTUS_MOUNT:ok' 'ULTUS_LINGER:yes' 'ULTUS_OWNER:1000' 'ULTUS_CANARY_END:ok' 'ULTUS_LISTEN:loopback'; do
-  if ! grep -qF "$marker" "$log"; then
+  if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true
     exit 1
@@ -144,12 +145,12 @@ for marker in 'ULTUS_CWD:ok' 'ULTUS_MOUNT:ok' 'ULTUS_LINGER:yes' 'ULTUS_OWNER:10
 done
 # The console echoes the probe, and that echo carries the printf format. Match a
 # concrete path so the echo cannot satisfy this check on its own.
-if grep -qE 'ULTUS_CANARY:/[^[:space:]]*:readable' "$log"; then
+if normalize_log <"$log" | grep -cE 'ULTUS_CANARY:/[^[:space:]]*:readable' >/dev/null; then
   echo "boot failed: a workload container read a host-only path" >&2
   grep -a 'ULTUS_CANARY:' "$log" >&2 || true
   exit 1
 fi
-if grep -q 'ULTUS_OWNER:0' "$log"; then
+if normalize_log <"$log" | grep -cF 'ULTUS_OWNER:0' >/dev/null; then
   echo "boot failed: the container's write landed owned by root" >&2
   exit 1
 fi
@@ -172,7 +173,7 @@ probe 'ULTUS_RESTORE:(ok|missing)' 60 'sudo test -f /var/srv/restore-check/var/s
 probe 'ULTUS_BACKUP_PROBE_END:ok' 60 'printf "ULTUS_BACKUP_PROBE_END:%s\n" ok'
 
 for marker in 'ULTUS_SECRETS:ok' 'ULTUS_BACKUP_ENV:ok' 'ULTUS_RESTIC_PASS:ok' 'ULTUS_CANARY_FILE:ok' 'ULTUS_ENV:ok' 'ULTUS_REPO:ok' 'ULTUS_BACKUP:0' 'ULTUS_RESTORE_RUN:ok' 'ULTUS_RESTORE:ok'; do
-  if ! grep -qF "$marker" "$log"; then
+  if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true
     exit 1
@@ -183,7 +184,7 @@ done
 # unit's TimeoutStartSec on TCG, and Restart=on-failure retries it, so start
 # without waiting and poll instead.
 probe 'ULTUS_ACTIVE_END:ok' "$timeout_s" 'sudo systemctl start --no-block opencode.service hermes.service; for i in $(seq 1 240); do if systemctl is-active --quiet opencode.service && systemctl is-active --quiet hermes.service; then printf "ULTUS_ACTIVE:%s\n" ok; break; fi; sleep 5; done; printf "ULTUS_ACTIVE_END:%s\n" ok'
-if ! grep -qF 'ULTUS_ACTIVE:ok' "$log"; then
+if ! normalize_log <"$log" | grep -cF 'ULTUS_ACTIVE:ok' >/dev/null; then
   echo "boot failed: a workload did not become active within its budget" >&2
   dump_workloads
   exit 1
@@ -203,6 +204,11 @@ if ! wait_for_new 'Password:' 60; then
   echo "login failed: no password prompt after the reboot" >&2
   exit 1
 fi
+# The shutting-down guest prints its own shell prompt after the reboot command,
+# and that line lands after the mark, so it would satisfy a prompt wait and the
+# next command would be typed into a booting console. This login's prompt cannot
+# precede its password prompt, so mark here, before the password is sent.
+mark_log
 serial_write "$test_password"
 if ! wait_for_new "${test_user}@" 180; then
   echo "login failed: no shell prompt after the reboot" >&2
@@ -213,7 +219,7 @@ prime_sudo
 probe 'ULTUS_REBOOT_MARKER:(ok|missing)' 60 'sudo test -f /var/srv/ultus/reboot-marker && printf "ULTUS_REBOOT_MARKER:%s\n" ok || printf "ULTUS_REBOOT_MARKER:%s\n" missing'
 probe 'ULTUS_REBOOT_END:ok' "$timeout_s" 'for i in $(seq 1 120); do if systemctl is-active --quiet opencode.service && systemctl is-active --quiet hermes.service; then printf "ULTUS_REBOOT_ACTIVE:%s\n" ok; break; fi; sleep 5; done; printf "ULTUS_REBOOT_END:%s\n" ok'
 for marker in 'ULTUS_REBOOT_MARKER:ok' 'ULTUS_REBOOT_ACTIVE:ok'; do
-  if ! grep -qF "$marker" "$log"; then
+  if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed after the reboot: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true
     dump_workloads
@@ -257,7 +263,7 @@ probe 'ULTUS_NODISK_TREE:(present|absent)' 60 'test -e /var/srv/ultus && printf 
 probe 'ULTUS_NODISK_END:ok' 60 'printf "ULTUS_NODISK_END:%s\n" ok'
 
 for marker in 'ULTUS_NODISK_MOUNT:absent' 'ULTUS_NODISK_CONDITION:no' 'ULTUS_NODISK_OPENCODE:inactive' 'ULTUS_NODISK_HERMES:inactive' 'ULTUS_NODISK_CONTAINER:absent' 'ULTUS_NODISK_TREE:absent'; do
-  if ! grep -qF "$marker" "$log"; then
+  if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed without a data disk: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true
     exit 1

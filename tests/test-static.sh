@@ -747,6 +747,26 @@ else
   echo "ok   boot-smoke.sh keeps the opt-in POST_LOGIN_CMD hook fail-closed"
 fi
 
+# A kernel console message can land inside a line the guest is writing and split
+# a marker across two lines: run 45553885679 printed
+# "ULTUS_NODISK_CON[  204.3] audit: ..." then "TAINER:absent", so the marker
+# wait timed out on a marker that had arrived. Both matchers must normalize the
+# log first, and the normalizer must rejoin the halves (#162).
+server_boot=$repo_root/tests/vm/boot-smoke-server.sh
+split_log=$cond_root/console-split.log
+printf '%s\n' \
+  'ULTUS_NODISK_CON[  204.301924] audit: type=1105 audit(1.2:3): res=success' \
+  'TAINER:absent' >"$split_log"
+if ! bash -c 'source "$1"; normalize_log <"$2" | grep -qx "ULTUS_NODISK_CONTAINER:absent"' \
+     _ "$qemu_lib" "$split_log" ||
+   ! grep -qF 'normalize_log <"$log" | grep -cE' "$qemu_lib" ||
+   ! grep -qF '"$log" | normalize_log | grep -cE' "$server_boot"; then
+  echo "FAIL a console marker split by a kernel message is not normalized before matching" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   a console marker split by a kernel message is matched after normalization"
+fi
+
 # A hosted TCG boot reached the login prompt after 21 minutes in run 43068532421
 # (#50), so the login wait must consume BOOT_TIMEOUT and CI must budget for it.
 # Lowering either brings back a red release for a slow runner, not a broken image.
