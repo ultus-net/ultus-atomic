@@ -308,17 +308,19 @@ probe 'ULTUS_NODISK_MOUNT:(absent|present)' 60 'mountpoint -q /var/srv && printf
 # refused the start because the mount was missing. That is the gate, not the
 # absence of a crash.
 probe 'ULTUS_NODISK_CONDITION:(yes|no)' 60 'test "$(systemctl show opencode.service -p ConditionResult --value)" = no && test "$(systemctl show hermes.service -p ConditionResult --value)" = no && printf "ULTUS_NODISK_CONDITION:%s\n" no || printf "ULTUS_NODISK_CONDITION:%s\n" yes'
-# The mount unit itself carries the refusal: with no device under the label it
-# names, var-srv.mount fails. `nofail` keeps that from stopping boot, so the
-# state is readable here.
-probe 'ULTUS_NODISK_UNIT:(failed|active)' 60 'test "$(systemctl is-failed var-srv.mount)" = failed && printf "ULTUS_NODISK_UNIT:%s\n" failed || printf "ULTUS_NODISK_UNIT:%s\n" active'
+# The mount unit itself carries the refusal. With no device under the label it
+# names, systemd times the device unit out and skips the mount job, so the unit
+# is inactive, never failed. Read the condition rather than the state name: a
+# unit that crashed reports Result=failed, a unit that refused reports
+# ConditionResult=no. The no-disk boot measured this state.
+probe 'ULTUS_NODISK_UNIT:(refused|started)' 60 'state=$(systemctl show var-srv.mount -p ActiveState --value); cond=$(systemctl show var-srv.mount -p ConditionResult --value); if [[ $state != active && $cond == no ]]; then printf "ULTUS_NODISK_UNIT:%s state=%s condition=%s\n" refused "$state" "$cond"; else printf "ULTUS_NODISK_UNIT:%s state=%s condition=%s\n" started "$state" "$cond"; fi'
 probe 'ULTUS_NODISK_OPENCODE:(active|inactive)' 60 'cd /var/tmp || exit 1; systemctl is-active --quiet opencode.service && printf "ULTUS_NODISK_OPENCODE:%s\n" active || printf "ULTUS_NODISK_OPENCODE:%s\n" inactive'
 probe 'ULTUS_NODISK_HERMES:(active|inactive)' 60 'systemctl is-active --quiet hermes.service && printf "ULTUS_NODISK_HERMES:%s\n" active || printf "ULTUS_NODISK_HERMES:%s\n" inactive'
 probe 'ULTUS_NODISK_CONTAINER:(present|absent)' "$timeout_s" 'containers=$(sudo -u agents env HOME=/var/lib/agents XDG_RUNTIME_DIR=/run/user/1000 podman ps -a --format "{{.Names}}" 2>/dev/null || true); case "$containers" in *opencode*|*hermes*) printf "ULTUS_NODISK_CONTAINER:%s\n" present ;; *) printf "ULTUS_NODISK_CONTAINER:%s\n" absent ;; esac'
 probe 'ULTUS_NODISK_TREE:(present|absent)' 60 'test -e /var/srv/ultus && printf "ULTUS_NODISK_TREE:%s\n" present || printf "ULTUS_NODISK_TREE:%s\n" absent'
 probe 'ULTUS_NODISK_END:ok' 60 'printf "ULTUS_NODISK_END:%s\n" ok'
 
-for marker in 'ULTUS_NODISK_MOUNT:absent' 'ULTUS_NODISK_CONDITION:no' 'ULTUS_NODISK_UNIT:failed' 'ULTUS_NODISK_OPENCODE:inactive' 'ULTUS_NODISK_HERMES:inactive' 'ULTUS_NODISK_CONTAINER:absent' 'ULTUS_NODISK_TREE:absent'; do
+for marker in 'ULTUS_NODISK_MOUNT:absent' 'ULTUS_NODISK_CONDITION:no' 'ULTUS_NODISK_UNIT:refused' 'ULTUS_NODISK_OPENCODE:inactive' 'ULTUS_NODISK_HERMES:inactive' 'ULTUS_NODISK_CONTAINER:absent' 'ULTUS_NODISK_TREE:absent'; do
   if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed without a data disk: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true
@@ -352,7 +354,7 @@ probe 'ULTUS_NOLABEL_WRONG:(present|absent)' 60 'test -e /dev/disk/by-label/ultu
 # name both sides, then read the unit's own verdict.
 probe 'ULTUS_NOLABEL_WHAT:(matches|other)' 60 'test "$(systemctl show var-srv.mount -p What --value)" = /dev/disk/by-label/ultus-data && printf "ULTUS_NOLABEL_WHAT:%s\n" matches || printf "ULTUS_NOLABEL_WHAT:%s\n" other'
 probe 'ULTUS_NOLABEL_LABEL:(none|present)' 60 'test ! -e /dev/disk/by-label/ultus-data && printf "ULTUS_NOLABEL_LABEL:%s\n" none || printf "ULTUS_NOLABEL_LABEL:%s\n" present'
-probe 'ULTUS_NOLABEL_UNIT:(failed|active)' 60 'test "$(systemctl is-failed var-srv.mount)" = failed && printf "ULTUS_NOLABEL_UNIT:%s\n" failed || printf "ULTUS_NOLABEL_UNIT:%s\n" active'
+probe 'ULTUS_NOLABEL_UNIT:(refused|started)' 60 'state=$(systemctl show var-srv.mount -p ActiveState --value); cond=$(systemctl show var-srv.mount -p ConditionResult --value); if [[ $state != active && $cond == no ]]; then printf "ULTUS_NOLABEL_UNIT:%s state=%s condition=%s\n" refused "$state" "$cond"; else printf "ULTUS_NOLABEL_UNIT:%s state=%s condition=%s\n" started "$state" "$cond"; fi'
 probe 'ULTUS_NOLABEL_MOUNT:(absent|present)' 60 'mountpoint -q /var/srv && printf "ULTUS_NOLABEL_MOUNT:%s\n" present || printf "ULTUS_NOLABEL_MOUNT:%s\n" absent'
 probe 'ULTUS_NOLABEL_CONDITION:(yes|no)' 60 'test "$(systemctl show opencode.service -p ConditionResult --value)" = no && test "$(systemctl show hermes.service -p ConditionResult --value)" = no && printf "ULTUS_NOLABEL_CONDITION:%s\n" no || printf "ULTUS_NOLABEL_CONDITION:%s\n" yes'
 probe 'ULTUS_NOLABEL_OPENCODE:(active|inactive)' 60 'cd /var/tmp || exit 1; systemctl is-active --quiet opencode.service && printf "ULTUS_NOLABEL_OPENCODE:%s\n" active || printf "ULTUS_NOLABEL_OPENCODE:%s\n" inactive'
@@ -361,7 +363,7 @@ probe 'ULTUS_NOLABEL_CONTAINER:(present|absent)' "$timeout_s" 'containers=$(sudo
 probe 'ULTUS_NOLABEL_TREE:(present|absent)' 60 'test -e /var/srv/ultus && printf "ULTUS_NOLABEL_TREE:%s\n" present || printf "ULTUS_NOLABEL_TREE:%s\n" absent'
 probe 'ULTUS_NOLABEL_END:ok' 60 'printf "ULTUS_NOLABEL_END:%s\n" ok'
 
-for marker in 'ULTUS_NOLABEL_PREMISE:seen' 'ULTUS_NOLABEL_WRONG:present' 'ULTUS_NOLABEL_WHAT:matches' 'ULTUS_NOLABEL_LABEL:none' 'ULTUS_NOLABEL_UNIT:failed' 'ULTUS_NOLABEL_MOUNT:absent' 'ULTUS_NOLABEL_CONDITION:no' 'ULTUS_NOLABEL_OPENCODE:inactive' 'ULTUS_NOLABEL_HERMES:inactive' 'ULTUS_NOLABEL_CONTAINER:absent' 'ULTUS_NOLABEL_TREE:absent'; do
+for marker in 'ULTUS_NOLABEL_PREMISE:seen' 'ULTUS_NOLABEL_WRONG:present' 'ULTUS_NOLABEL_WHAT:matches' 'ULTUS_NOLABEL_LABEL:none' 'ULTUS_NOLABEL_UNIT:refused' 'ULTUS_NOLABEL_MOUNT:absent' 'ULTUS_NOLABEL_CONDITION:no' 'ULTUS_NOLABEL_OPENCODE:inactive' 'ULTUS_NOLABEL_HERMES:inactive' 'ULTUS_NOLABEL_CONTAINER:absent' 'ULTUS_NOLABEL_TREE:absent'; do
   if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed with an unlabelled data disk: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true

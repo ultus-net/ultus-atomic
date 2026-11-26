@@ -163,8 +163,8 @@ The server boot test is not a gate on its own; CI runs it inside `image-server`.
 | `ULTUS_SESSION:ok` | The OpenCode server answers on `127.0.0.1:4096/api/session` with that password and creates a session; the guest keeps its id on the data disk |
 | `ULTUS_SESSION_READ:ok` | After the reboot the guest reads that id back and the server returns the session with the `pre-window` title it was created with, so the workload resumes client work |
 | `ULTUS_REBOOT_MARKER:ok`, `ULTUS_REBOOT_ACTIVE:ok` | The data disk and both workloads survive a guest reboot |
-| `ULTUS_NODISK_*` | With no data drive, `var-srv.mount` fails, `/var/srv` is not a mountpoint, systemd refused both workload starts (`ConditionResult=no`, not a crash), no container is left behind, and `/var/srv/ultus` is not created on the OS disk |
-| `ULTUS_NOLABEL_*` | With a drive whose label is `ultus-data-wrong`, the guest sees that label and udev publishes it under by-label (`PREMISE:seen`, `WRONG:present`), `var-srv.mount` names `/dev/disk/by-label/ultus-data` (`WHAT:matches`), no device carries that label (`LABEL:none`), so the unit failed (`UNIT:failed`) and both workloads stay down with nothing written to the OS disk |
+| `ULTUS_NODISK_*` | With no data drive, `var-srv.mount` refuses the start (`UNIT:refused` reports `ConditionResult=no` and a non-active state, not a crash), `/var/srv` is not a mountpoint, systemd refused both workload starts (`CONDITION:no`), no container is left behind, and `/var/srv/ultus` is not created on the OS disk |
+| `ULTUS_NOLABEL_*` | With a drive whose label is `ultus-data-wrong`, the guest sees that label and udev publishes it under by-label (`PREMISE:seen`, `WRONG:present`), `var-srv.mount` names `/dev/disk/by-label/ultus-data` (`WHAT:matches`), no device carries that label (`LABEL:none`), so the unit refused the start (`UNIT:refused`, `ConditionResult=no`) and both workloads stay down with nothing written to the OS disk |
 
 It builds its own disk inputs:
 
