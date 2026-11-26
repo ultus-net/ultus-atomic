@@ -392,7 +392,11 @@ for marker in 'ULTUS_NOLABEL_PREMISE:seen' 'ULTUS_NOLABEL_WRONG:present' 'ULTUS_
   fi
 done
 
-echo "server boot ok: mount, /srv, rootless write, canaries, backup restore, session resume, reboot, the no-disk path and the unlabelled-disk path"
+session_stage='session resume'
+if ((session_skip)); then
+  session_stage='session resume skipped on TCG'
+fi
+echo "server boot ok: mount, /srv, rootless write, canaries, backup restore, ${session_stage}, reboot, the no-disk path and the unlabelled-disk path"
 echo "log: $first_log"
 echo "log: $nodisk_log"
 echo "log: $log"
