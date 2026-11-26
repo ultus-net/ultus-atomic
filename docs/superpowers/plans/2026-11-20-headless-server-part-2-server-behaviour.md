@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status: shipped.** Part 2 merged in PR #162 (`0666cd9`, issue #152). Every
+> step below is ticked because it landed. This file is the historical plan, not a
+> tracker. The live view of the work is #149's parts table. Two items sit outside
+> this plan: enabling `tailscaled` in every image is #151, and the hardware run of
+> the slice is #154.
+
 **Goal:** Turn the part 1 server image into a server: two rootless agent workloads under a dedicated `agents` user, secrets read from the data partition, a tailnet join with the surfaces published, a quiesced backup that restores, and an update that applies only inside a maintenance window.
 
 **Architecture:** One module tree, `modules/server/`, owns every file the server role ships, and its build hook owns the user, the linger flag and the unit enablement. Workloads are explicit `podman run` units rather than quadlets, because the isolation gate parses what will actually run. Secrets live once, on the data disk; each workload gets a derived file in tmpfs under `/run/ultus`. The data disk is a precondition for every workload unit, so a missing disk stops the agents instead of letting them write to the OS disk.
@@ -154,7 +160,7 @@ Four properties cannot be proven from a container, because each needs a booted s
 - Modify: `docs/superpowers/plans/2026-11-20-headless-server-part-2-server-behaviour.md` (this file: record the results in "Spike results")
 - Test: a booted server image from part 1
 
-- [ ] **Step 1: Build and install a server disk with a data disk**
+- [x] **Step 1: Build and install a server disk with a data disk**
 
 ```bash
 podman build -f Containerfile.server -t localhost/ultus-atomic-server:dev .
@@ -164,7 +170,7 @@ sudo SERVER_DISK=1 tests/vm/make-disk.sh localhost/ultus-atomic-server:dev
 
 `SERVER_DISK=1` is written in Task 8 and does two things: it puts the test account in `wheel`, and it writes a second qcow2 named `data.qcow2` whose filesystem is ext4 and whose label is `ultus-data`. Until Task 8 exists, build that second disk by hand with the same two properties, and check them with `blkid output/qcow2/data.qcow2`, which must print `LABEL="ultus-data"` and `TYPE="ext4"`.
 
-- [ ] **Step 2: Prove linger gives `agents` a runtime directory with no login**
+- [x] **Step 2: Prove linger gives `agents` a runtime directory with no login**
 
 Boot the disk with both drives. Log in as the test account, then:
 
@@ -179,7 +185,7 @@ loginctl list-sessions --no-legend | grep -c agents || true
 
 Expected: `Linger=yes`, `/run/user/1000` owned `agents`, and `0` sessions for `agents`. A linger flag with no session and a live runtime directory is the property the spec needs.
 
-- [ ] **Step 3: Prove rootless Podman starts from a system unit**
+- [x] **Step 3: Prove rootless Podman starts from a system unit**
 
 ```bash
 sudo systemd-run --unit=spike-podman --uid=agents --setenv=HOME=/var/lib/agents \
@@ -191,7 +197,7 @@ Expected: `v2 true`. A `v1` or `false` answer stops the task: the plan is revise
 
 Then reboot with `systemctl reboot` and run the same command again before logging in. Expected: the same `v2 true`. That second run is what proves the system units in Tasks 4 and 5 can reach `/run/user/1000` from boot with no login, which is the ordering their `After=user-runtime-dir@1000.service` line assumes.
 
-- [ ] **Step 4: Prove `--userns=keep-id` writes land owned by `agents`**
+- [x] **Step 4: Prove `--userns=keep-id` writes land owned by `agents`**
 
 ```bash
 sudo -u agents env HOME=/var/lib/agents XDG_RUNTIME_DIR=/run/user/1000 \
@@ -204,7 +210,7 @@ stat -c '%u:%g %n' /var/srv/opencode/share/probe
 
 Expected: the container prints `uid=1000 gid=1000`, and the host prints `1000:1000`. Create `/var/srv/opencode/share` with `install -d -o agents -g agents` first if Task 5 has not shipped.
 
-- [ ] **Step 5: Prove a session survives a container restart**
+- [x] **Step 5: Prove a session survives a container restart**
 
 ```bash
 sudo -u agents env HOME=/var/lib/agents XDG_RUNTIME_DIR=/run/user/1000 podman run -d --name oc-spike \
@@ -224,7 +230,7 @@ The password is not in the log: `serve --service` writes it to `service.json` in
 
 Expected: the session id from before the restart is still listed. Record the command form that produced it. If the session is gone, stop and report: restart continuity is a spec acceptance criterion, and the fix belongs in the image or the mount layout, not in a weaker test.
 
-- [ ] **Step 6: Record the results in this plan**
+- [x] **Step 6: Record the results in this plan**
 
 Add a `## Spike results` section after "Already in the tree" with one row per step: command, observed output, date, and the podman and systemd versions from the guest. Commit it with the message `docs: record the part 2 mechanism spikes (#152)`.
 
@@ -243,7 +249,7 @@ Add a `## Spike results` section after "Already in the tree" with one row per st
 **Interfaces:**
 - Produces: user `agents` uid 1000 gid 1000, home `/var/lib/agents`, shell `/sbin/nologin`, ranges `100000:65536`, linger flag at `/var/lib/systemd/linger/agents`. `ultus-data-prepare.service` is enabled and creates `/var/srv/ultus` (0700 `root:root`), `/var/srv/{opencode,hermes,repos}` (0750 `agents:agents`), and the four workload state directories (0700 `agents:agents`).
 
-- [ ] **Step 1: Write the failing static assertions**
+- [x] **Step 1: Write the failing static assertions**
 
 Append to `tests/test-static.sh`:
 
@@ -271,12 +277,12 @@ else
 fi
 ```
 
-- [ ] **Step 2: Run the static gate to verify it fails**
+- [x] **Step 2: Run the static gate to verify it fails**
 
 Run: `tests/test-static.sh`
 Expected: FAIL with `the server hook does not create the agents user with uid 1000`.
 
-- [ ] **Step 3: Extend the server hook**
+- [x] **Step 3: Extend the server hook**
 
 Append to `modules/server/usr/libexec/ultus-atomic/build.d/50-server.sh`, after the existing mount assertion:
 
@@ -300,7 +306,7 @@ chmod 0644 /var/lib/systemd/linger/agents
 systemctl enable ultus-data-prepare.service
 ```
 
-- [ ] **Step 4: Create the prepare unit and its script**
+- [x] **Step 4: Create the prepare unit and its script**
 
 `modules/server/usr/lib/systemd/system/ultus-data-prepare.service`:
 
@@ -346,12 +352,12 @@ install -d -m 0700 -o agents -g agents /var/lib/agents
 
 `chmod 0755 modules/server/usr/libexec/ultus/ultus-data-prepare` and add the path to the `bash_scripts` array in `tests/lint.sh`.
 
-- [ ] **Step 5: Run the static gate to verify it passes**
+- [x] **Step 5: Run the static gate to verify it passes**
 
 Run: `tests/test-static.sh && CONTAINER_RUNTIME=podman tests/lint.sh`
 Expected: `static checks passed`, then `apt mirror failover checks passed` and a clean shellcheck for the new script.
 
-- [ ] **Step 6: Build the image and assert the wiring**
+- [x] **Step 6: Build the image and assert the wiring**
 
 ```bash
 podman build -f Containerfile.server -t localhost/ultus-atomic-server:dev .
@@ -362,11 +368,11 @@ podman run --rm localhost/ultus-atomic-server:dev bash -lc '
 
 Expected: the passwd line, both range lines, and `enabled`.
 
-- [ ] **Step 7: Update the docs and changelog**
+- [x] **Step 7: Update the docs and changelog**
 
 Add to `CHANGELOG.md`: `- Create the server's rootless agents user and a unit that prepares the data-disk subtree only when the disk is mounted (#152).` In `docs/build.md`, name the new hook step and the user it creates.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add modules/server tests/test-static.sh tests/lint.sh CHANGELOG.md docs/build.md
@@ -391,7 +397,7 @@ git commit -m "feat: create the server agents user and data-disk prep (#152)"
 - Produces: `/usr/libexec/ultus/ultus-env <opencode|hermes>` reads `/var/srv/ultus/secrets.env` and writes `/run/ultus/<workload>.env`, mode 0600, owner `agents`, containing only that workload's keys. Any missing required key exits 1 with a message naming the key.
 - `opencode-env.service` and `hermes-env.service` are `Type=oneshot`, `RemainAfterExit=yes`, `RequiresMountsFor=/var/srv`, `After=ultus-data-prepare.service`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/test-server-env.sh`:
 
@@ -475,12 +481,12 @@ OPENROUTER_API_KEY=provider-key
 
 Both fixtures are `.txt`. A `.env` name is what the editor's deny rule and a secret scanner treat as a real secret, and these values are placeholders.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `CONTAINER_RUNTIME=podman tests/test-server-env.sh`
 Expected: FAIL, because `modules/server/usr/libexec/ultus/ultus-env` does not exist.
 
-- [ ] **Step 3: Write `ultus-env`**
+- [x] **Step 3: Write `ultus-env`**
 
 ```bash
 #!/bin/bash
@@ -565,12 +571,12 @@ echo "ultus-env: wrote $out"
 
 `chmod 0755` the script. Add it to `tests/lint.sh`'s `bash_scripts` and add `bash tests/test-server-env.sh` beside the other test invocations.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `CONTAINER_RUNTIME=podman tests/test-server-env.sh`
 Expected: `server env tests passed`.
 
-- [ ] **Step 5: Add the two env units**
+- [x] **Step 5: Add the two env units**
 
 `opencode-env.service`:
 
@@ -592,7 +598,7 @@ WantedBy=multi-user.target
 
 `hermes-env.service` is identical with `Description=Derive the Hermes environment from the data-disk secrets`, `Before=hermes.service`, and `ExecStart=/usr/libexec/ultus/ultus-env hermes`.
 
-- [ ] **Step 6: Enable both units in the hook and assert them**
+- [x] **Step 6: Enable both units in the hook and assert them**
 
 Append to `modules/server/usr/libexec/ultus-atomic/build.d/50-server.sh`:
 
@@ -621,16 +627,16 @@ for pair in 'opencode-env.service:opencode' 'hermes-env.service:hermes'; do
 done
 ```
 
-- [ ] **Step 7: Run the gates**
+- [x] **Step 7: Run the gates**
 
 Run: `tests/test-static.sh && CONTAINER_RUNTIME=podman tests/lint.sh && CONTAINER_RUNTIME=podman tests/test-server-env.sh`
 Expected: all three pass.
 
-- [ ] **Step 8: Write the first `docs/server.md`**
+- [x] **Step 8: Write the first `docs/server.md`**
 
 Sections: what the server image is; first boot (the `systemd.debug_shell` route from `docs/install.md:67`, then `/var/srv` check, `/var/srv/ultus` creation, `secrets.env` and `backup.env` contents with every key named, the tailnet key); how to confirm each workload is up; and the recovery route (`bootc rollback --apply`). Link it from `README.md` after the Install entry and add a row to `docs/testing.md`'s gate table for `tests/test-server-env.sh`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add modules/server tests/fixtures tests/test-server-env.sh tests/test-static.sh tests/lint.sh docs/server.md docs/testing.md README.md CHANGELOG.md
@@ -655,7 +661,7 @@ git commit -m "feat: derive workload secrets on the server (#152)"
 - Produces: `opencode.service` and `hermes.service` as `User=agents` units running explicit `podman run` commands with `--userns=keep-id`, `--read-only`, `--cap-drop=all`, `--security-opt no-new-privileges`, one `-p 127.0.0.1:` per port, and image references from `EnvironmentFile=-/var/srv/ultus/workloads.env` over build-time defaults.
 - `tests/test-server-isolation.sh` exits 0 on the shipped units and 1 on `tests/fixtures/server-units/widened.service`.
 
-- [ ] **Step 1: Write the failing isolation test**
+- [x] **Step 1: Write the failing isolation test**
 
 `tests/fixtures/server-units/widened.service` is a real unit that carries every rejected spelling:
 
@@ -781,12 +787,12 @@ echo "server isolation checks passed"
 
 The fixture pass runs the forbidden list and the publish list only, because a fixture that also had to carry every required token would be a real unit. The strict pass covers the shipped workloads. The fixture's `-p 4096:4096` is what proves the publish check fires at all.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `tests/test-server-isolation.sh`
 Expected: FAIL, because `modules/server/usr/lib/systemd/system/opencode.service` does not exist.
 
-- [ ] **Step 3: Write `opencode.service`**
+- [x] **Step 3: Write `opencode.service`**
 
 ```ini
 [Unit]
@@ -834,7 +840,7 @@ The `--tmpfs /home/dev/.local` from the spike is deliberately absent: `/var/srv/
 
 Every tmpfs carries `:rw,mode=1777`: a bare `--tmpfs` is root-owned 0755 and the container process is uid 1000, so the second start logged `EACCES: permission denied, mkdir '/home/dev/.cache/opencode'`.
 
-- [ ] **Step 4: Write `hermes.service`**
+- [x] **Step 4: Write `hermes.service`**
 
 ```ini
 [Unit]
@@ -878,7 +884,7 @@ WantedBy=multi-user.target
 
 The image runs under s6 as root and drops to `PUID`/`PGID`; `-u 1000` plus `keep-id` keeps that pair equal to `agents`. If the first boot exits with a write to a path under `/var` or `/etc`, add the smallest tmpfs that covers it and record the addition in the unit's comment, not in a wider mount.
 
-- [ ] **Step 5: Write `ultus-network.service`**
+- [x] **Step 5: Write `ultus-network.service`**
 
 ```ini
 [Unit]
@@ -899,7 +905,7 @@ ExecStart=/usr/bin/podman network create --ignore ultus
 WantedBy=multi-user.target
 ```
 
-- [ ] **Step 6: Enable the units and run the gates**
+- [x] **Step 6: Enable the units and run the gates**
 
 Append to the server hook:
 
@@ -917,7 +923,7 @@ done
 Run: `tests/test-server-isolation.sh && tests/test-static.sh && CONTAINER_RUNTIME=podman tests/lint.sh`
 Expected: `server isolation checks passed`, then `static checks passed`, then a clean lint.
 
-- [ ] **Step 7: Build and inspect**
+- [x] **Step 7: Build and inspect**
 
 ```bash
 podman build -f Containerfile.server -t localhost/ultus-atomic-server:dev .
@@ -927,11 +933,11 @@ podman run --rm localhost/ultus-atomic-server:dev bash -lc \
 
 Expected: `enabled` for all five.
 
-- [ ] **Step 8: Update the docs and changelog**
+- [x] **Step 8: Update the docs and changelog**
 
 `docs/server.md` gains the workload section: which subtree each workload sees, the two image defaults, where the override file is and who may write it, and the rule that a new mount needs an isolation-test change. `docs/testing.md` gains a row for `tests/test-server-isolation.sh`. `CHANGELOG.md` gains one line naming the rootless workload units.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add modules/server tests/test-server-isolation.sh tests/fixtures/server-units tests/lint.sh docs/server.md docs/testing.md CHANGELOG.md
@@ -953,7 +959,7 @@ git commit -m "feat: run the server workloads rootless with an isolation gate (#
 **Interfaces:**
 - Produces: `ultus-tailnet.service` joins with `--hostname=ultus-server`, runs `tailscale set --ssh=true`, publishes 443 to OpenCode, 8443 to the Hermes dashboard and 10000 to the Hermes gateway, and removes the auth key afterwards. An already-joined node skips the join.
 
-- [ ] **Step 1: Write the failing static assertion**
+- [x] **Step 1: Write the failing static assertion**
 
 ```bash
 tailnet_unit=$repo_root/modules/server/usr/lib/systemd/system/ultus-tailnet.service
@@ -982,12 +988,12 @@ else
 fi
 ```
 
-- [ ] **Step 2: Run the static gate to verify it fails**
+- [x] **Step 2: Run the static gate to verify it fails**
 
 Run: `tests/test-static.sh`
 Expected: FAIL with `the tailnet script does not publish '--https=443 ...'`.
 
-- [ ] **Step 3: Write the script and the unit**
+- [x] **Step 3: Write the script and the unit**
 
 `modules/server/usr/libexec/ultus/ultus-tailnet`:
 
@@ -1053,16 +1059,16 @@ WantedBy=multi-user.target
 
 `chmod 0755` the script, add it to `tests/lint.sh`, and enable the unit in the hook with the same `is-enabled` assertion the earlier tasks use.
 
-- [ ] **Step 4: Run the gates**
+- [x] **Step 4: Run the gates**
 
 Run: `tests/test-static.sh && tests/test-server-isolation.sh && CONTAINER_RUNTIME=podman tests/lint.sh`
 Expected: all pass.
 
-- [ ] **Step 5: Record the surfaces in `docs/server.md`**
+- [x] **Step 5: Record the surfaces in `docs/server.md`**
 
 Add the three URLs (`https://ultus-server.<tailnet>.ts.net`, `:8443`, `:10000`), what each one serves, and the rule that a new surface is a publish on `127.0.0.1` plus a `tailscale serve --bg` line plus an isolation-test run.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add modules/server tests/test-static.sh tests/lint.sh docs/server.md CHANGELOG.md
@@ -1090,7 +1096,7 @@ git commit -m "feat: join the tailnet and publish the server surfaces (#152)"
 - `ultus-update-window.timer` fires at 04:00, drains the workloads, applies a staged deployment, and reboots. A failure restarts the workloads and does not reboot.
 - The drop-in replaces the stock `ExecStart` with `bootc upgrade --download-only --quiet`.
 
-- [ ] **Step 1: Write the failing assertions**
+- [x] **Step 1: Write the failing assertions**
 
 ```bash
 backup_unit=$repo_root/modules/server/usr/lib/systemd/system/ultus-backup.service
@@ -1125,12 +1131,12 @@ else
 fi
 ```
 
-- [ ] **Step 2: Run the static gate to verify it fails**
+- [x] **Step 2: Run the static gate to verify it fails**
 
 Run: `tests/test-static.sh`
 Expected: FAIL with `ultus-backup.service would back up an unmounted /var/srv`.
 
-- [ ] **Step 3: Write the health script and units**
+- [x] **Step 3: Write the health script and units**
 
 `ultus-health`:
 
@@ -1183,7 +1189,7 @@ AccuracySec=10s
 WantedBy=timers.target
 ```
 
-- [ ] **Step 4: Write the backup script and units**
+- [x] **Step 4: Write the backup script and units**
 
 `ultus-backup`:
 
@@ -1311,7 +1317,7 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-- [ ] **Step 5: Write the update drop-in and the window**
+- [x] **Step 5: Write the update drop-in and the window**
 
 `bootc-fetch-apply-updates.service.d/download-only.conf`:
 
@@ -1409,7 +1415,7 @@ RandomizedDelaySec=600
 WantedBy=timers.target
 ```
 
-- [ ] **Step 6: Enable the units and timers, and run the gates**
+- [x] **Step 6: Enable the units and timers, and run the gates**
 
 Append to the server hook:
 
@@ -1429,7 +1435,7 @@ done
 Run: `tests/test-static.sh && tests/test-server-isolation.sh && CONTAINER_RUNTIME=podman tests/lint.sh`
 Expected: all pass.
 
-- [ ] **Step 7: Verify every unit parses**
+- [x] **Step 7: Verify every unit parses**
 
 ```bash
 podman build -f Containerfile.server -t localhost/ultus-atomic-server:dev .
@@ -1440,11 +1446,11 @@ podman run --rm localhost/ultus-atomic-server:dev systemd-analyze verify \
 
 Expected: no output. `systemd-analyze` reports unknown directives as errors, so a typo fails here rather than at first boot.
 
-- [ ] **Step 8: Update the docs and changelog**
+- [x] **Step 8: Update the docs and changelog**
 
 `docs/server.md` gains the backup section (both env files' keys, the restore command, that retention is automatic and pruning is weekly), the update section (what the window does, what a failed apply leaves behind, how to opt out by disabling the timer), and the health section. `CHANGELOG.md` gains one line naming the timers.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add modules/server tests/test-static.sh tests/lint.sh docs/server.md CHANGELOG.md
@@ -1464,7 +1470,7 @@ git commit -m "feat: add server health, backup and the update window (#152)"
 - `tests/verify-image.sh --server` additionally asserts: the `agents` user and ranges, the linger flag, every unit this part ships is enabled, every unit passes `systemd-analyze verify`, and the drop-in replaces `--apply`. The loopback-publish rule is asserted by `tests/test-server-isolation.sh`, not here, because that test already parses every unit.
 - The server path filter covers the two new test scripts, the two server fixtures, and `tests/vm/`, so a change to any of them rebuilds and boots the image it grades. The fixture path is narrowed to `tests/fixtures/server-` so a desktop fixture does not trigger a server build.
 
-- [ ] **Step 1: Write the failing verifier assertions**
+- [x] **Step 1: Write the failing verifier assertions**
 
 In the `--server` block, after the Flathub check at line 329, add:
 
@@ -1505,12 +1511,12 @@ In the `--server` block, after the Flathub check at line 329, add:
   echo "ok   the stock update only downloads; the window applies"
 ```
 
-- [ ] **Step 2: Run the verifier to watch it fail**
+- [x] **Step 2: Run the verifier to watch it fail**
 
 Run: `tests/verify-image.sh --server localhost/ultus-atomic-server:dev`
 Expected: FAIL with `the server image lacks the agents user, ranges, or linger flag`, until Task 2's image is rebuilt.
 
-- [ ] **Step 3: Rebuild and run the verifier**
+- [x] **Step 3: Rebuild and run the verifier**
 
 ```bash
 podman build -f Containerfile.server -t localhost/ultus-atomic-server:dev .
@@ -1519,7 +1525,7 @@ tests/verify-image.sh --server localhost/ultus-atomic-server:dev
 
 Expected: every `ok` line, and the lock comparison stays clean because no package changed.
 
-- [ ] **Step 4: Extend the CI filter**
+- [x] **Step 4: Extend the CI filter**
 
 In `.github/workflows/ci.yml:123`, replace the `regex=` line with:
 
@@ -1529,16 +1535,16 @@ regex='^(Containerfile$|Containerfile\.server$|build/|overlay/|modules/|manifest
 
 `tests/vm/` is in the list because Task 8 adds the boot step to `image-server` and the script it runs lives there. `tests/fixtures/server-` is a prefix, not the whole fixtures tree, so a desktop fixture edit does not rebuild the server image.
 
-- [ ] **Step 5: Lint the workflow and run every gate**
+- [x] **Step 5: Lint the workflow and run every gate**
 
 Run: `CONTAINER_RUNTIME=podman tests/lint.sh && tests/test-static.sh && tests/test-server-isolation.sh && CONTAINER_RUNTIME=podman tests/test-server-env.sh`
 Expected: all pass; `actionlint` accepts the filter change.
 
-- [ ] **Step 6: Update the docs and changelog**
+- [x] **Step 6: Update the docs and changelog**
 
 `docs/ci.md` line 8's `image-server` paragraph gains the new path list. `docs/testing.md`'s image-gate row for `verify-image.sh --server` gains the user, linger, unit and drop-in assertions. `CHANGELOG.md` gains one line.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests/verify-image.sh .github/workflows/ci.yml docs/ci.md docs/testing.md CHANGELOG.md
@@ -1564,11 +1570,11 @@ git commit -m "test: verify the server role in the image gate (#152)"
 - The reboot stage needs QEMU to survive a guest reboot and to keep the guest's writes, so the extracted library makes both flags parameters. `QEMU_SNAPSHOT` keeps its current default of 1, and `QEMU_NO_REBOOT` keeps its current default of 1. The server test sets `QEMU_NO_REBOOT=0` and leaves the snapshot on, which keeps the writes for the second boot and still leaves the source disk untouched.
 - The boot test pulls both workload images from the guest, so it needs outbound HTTPS to `ghcr.io` and `docker.io`. A runner without it fails at the pull, and the failure dump names the pull error rather than reporting a workload that never started.
 
-- [ ] **Step 1: Extract the QEMU library**
+- [x] **Step 1: Extract the QEMU library**
 
 Move `find_ovmf`, the qemu argument list, the serial pipe setup, `wait_for`, `serial_write`, `serial_login` and the cleanup trap from `boot-smoke.sh` into `tests/vm/lib/qemu.sh` as functions over a `disk` list. The argument list takes `QEMU_SNAPSHOT` and `QEMU_NO_REBOOT` with the defaults named above, because the server test reboots the guest and the desktop test does not. Have `boot-smoke.sh` source the library and keep every message string identical, so the desktop job's failure output does not change. Keep the `POST_LOGIN_CMD` hook as well: `tests/test-static.sh:630-643` asserts it exists and is fail-closed. Run `bash -n` on both files, add `tests/vm/lib/qemu.sh` to `tests/lint.sh`'s `bash_scripts`, and commit this alone with `refactor: extract the QEMU boot harness (#152)`.
 
-- [ ] **Step 2: Write the server boot test**
+- [x] **Step 2: Write the server boot test**
 
 `tests/vm/boot-smoke-server.sh` sources the library and runs serial probes after login, in the shape `boot-smoke.sh` already uses with `DUX_*` markers. Name the server markers `ULTUS_*`:
 
@@ -1591,11 +1597,11 @@ Then, driven from the test rather than the guest:
 
 Expected output: `server boot ok` with every marker at its expected value. Print the log path as the desktop script does.
 
-- [ ] **Step 3: Add `SERVER_DISK=1` to `make-disk.sh`**
+- [x] **Step 3: Add `SERVER_DISK=1` to `make-disk.sh`**
 
 When set: add `groups = ["wheel"]` to the `[[customizations.user]]` block, and after the qcow2 build, create `$out/qcow2/data.qcow2` as a sparse 8 GiB file carrying an ext4 filesystem labelled `ultus-data`, owned by the caller. Print the path and verify it with `blkid`, which must print both properties. Refuse `SERVER_DISK=1` together with `NO_TEST_USER=1`, because the server probes need an account with sudo.
 
-- [ ] **Step 4: Run the server boot test locally**
+- [x] **Step 4: Run the server boot test locally**
 
 ```bash
 sudo SERVER_DISK=1 tests/vm/make-disk.sh localhost/ultus-atomic-server:dev
@@ -1605,7 +1611,7 @@ SERVER_DATA_DISK=$PWD/output/qcow2/data.qcow2 QEMU_NO_REBOOT=0 \
 
 Expected: `server boot ok`. On a host without `/dev/kvm` expect the same output much later; set `BOOT_TIMEOUT=2700`. The VM needs outbound HTTPS for the two image pulls.
 
-- [ ] **Step 5: Add the boot step to `image-server`**
+- [x] **Step 5: Add the boot step to `image-server`**
 
 There is no separate boot job to copy: `image` runs `boot-smoke.sh` inside itself (`ci.yml:258-272`), after it builds and verifies the image. `image-server` does the same thing, so the boot run goes there and no second image build is paid for.
 
@@ -1647,11 +1653,11 @@ There is no separate boot job to copy: `image` runs `boot-smoke.sh` inside itsel
 
 The job stays gated on the `server` filter. No `needs:` change is needed, because `image-server` already depends on `static` and `changes`.
 
-- [ ] **Step 6: Update the docs and changelog**
+- [x] **Step 6: Update the docs and changelog**
 
 `docs/testing.md` gains the server boot row, the `SERVER_DATA_DISK`/`QEMU_NO_REBOOT` pair, the note that the reboot stage doubles the runtime, and the outbound-network requirement. `docs/testing.md:143` currently says "The server VM slice is a later part", which this task makes false, so replace that line. `docs/ci.md:8` says `image-server` "does not build a disk, run the boot smoke test, ... export, or publish the artifact", which is only true until this step; keep the export and publish exclusions and drop the disk and boot ones. `CHANGELOG.md` gains one line.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests/vm tests/lint.sh .github/workflows/ci.yml docs/testing.md docs/ci.md CHANGELOG.md
