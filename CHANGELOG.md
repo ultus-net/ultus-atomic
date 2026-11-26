@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Record where each headless-server part shipped and tick both plans (part 1
+  `docs/superpowers/plans/2026-11-20-headless-server-part-1-base-and-image.md`,
+  part 2 `docs/superpowers/plans/2026-11-20-headless-server-part-2-server-behaviour.md`).
+  Neither plan had a ticked step after its part merged, so an unticked box read
+  as open work. A plan is the historical record now, and open work lives only in
+  #149's parts and open-work tables. The one remaining undocumented piece, the
+  OpenCode image move and the digest update path, became #163.
+
 - Refresh the third-party package lock after the duxlabs COPR rebuilt `dux-qt-base-git` from `0.4.73^962.git75d4524` to `0.4.74^967.git1f768a3` (#162). Run 45553885679 failed the `image` job on that drift, and the printed diff names `manifests/packages-common.lock:14` as the entire difference. No manifest, build step or image behaviour changes.
 
 - Rewrite the README for what the repo is now: one tree, two Fedora bootc roles. It states the desktop and server split in one table (build file, extra manifest, module, what each ships, accounts, image gate), then what the pair is for: one drive per host, agents never on the host, one route in over the tailnet, and updates inside a window. The status table gains rows for the server image and the tailnet, and the first-login screenshot is removed because one role is now a headless host with no desktop to show. The GitHub description changes to name both images.
