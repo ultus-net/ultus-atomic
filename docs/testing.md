@@ -166,7 +166,7 @@ The server boot test is not a gate on its own; CI runs it inside `image-server`.
 | `ULTUS_NODISK_*` | With no data drive, `var-srv.mount` refuses the start (`UNIT:refused` reports `ConditionResult=no` and a non-active state, not a crash), `/var/srv` is not a mountpoint, systemd refused both workload starts (`CONDITION:no`), no container is left behind, and `/var/srv/ultus` is not created on the OS disk |
 | `ULTUS_NOLABEL_*` | With a drive whose label is `ultus-data-wrong`, the guest sees that label and udev publishes it under by-label (`PREMISE:seen`, `WRONG:present`), `var-srv.mount` names `/dev/disk/by-label/ultus-data` (`WHAT:matches`), no device carries that label (`LABEL:none`), so the unit refused the start (`UNIT:refused`, `ConditionResult=no`) and both workloads stay down with nothing written to the OS disk |
 
-On a hosted runner the guest runs under QEMU TCG, which cannot execute every instruction OpenCode's runtime emits: run 45780444809's second boot aborted the server with `trap invalid opcode`, so the two session markers read `skipped-tcg` there rather than failing the job. The KVM run and the hardware UAT in #149 carry that proof.
+On a hosted runner the guest runs under QEMU TCG, which cannot execute every instruction OpenCode's runtime emits: run 45780444809's second boot aborted the server with `trap invalid opcode`, so the two session markers read `skipped-tcg` there rather than failing the job. A skip marker records that the probe did not run, not that the API passed. The KVM run and the hardware UAT in #149 carry that proof.
 
 It builds its own disk inputs:
 

@@ -238,7 +238,7 @@ fi
 
 # The update window's failure contract is a resumed session: OpenCode persists
 # its state under /var/srv, so a client that reconnects after a reboot finds the
-# session it left. Create one through the published loopback port, keep its id on
+# session it left. Create one on the guest's own loopback port, keep its id on
 # the data disk, and read it back after the reboot. The password comes from the
 # seeded service.json and the basic-auth user is `opencode`. The guest writes the
 # id, so this harness never parses the console log for it.
