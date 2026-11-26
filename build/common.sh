@@ -70,6 +70,10 @@ fi
 # has no console or SSH login, so keep the unit disabled.
 systemctl disable sshd.service
 
+# The spec bakes Tailscale into every role, so enable the daemon here rather
+# than in one module. Enabling the unit joins no tailnet and ships no secrets.
+systemctl enable tailscaled.service
+
 # A module may ship build-time steps under /usr/libexec/ultus-atomic/build.d/.
 # They run in name order after the shared install, so a module owns its
 # repositories, its packages, its presets and its checks, and this build names

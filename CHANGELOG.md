@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Enable `tailscaled.service` in every image, not only the server's tailnet. The enable sits in `build/common.sh`, which every Containerfile runs, so the desktop, headless and server roles all carry an enabled daemon. Nothing joins a tailnet at build time: no auth key, node key or daemon state file ships. `tests/verify-image.sh` asserts `systemctl is-enabled tailscaled.service` returns `enabled` for every role, beside the existing `sshd.service` assertion, and `tests/test-static.sh` reds if `build/common.sh` stops enabling the unit or the image gate stops reading it. The same assertion proves the image ships no tailscaled state, because the package's `/var/lib/tailscale` is empty (#151).
+
 - Refresh the third-party package lock after the duxlabs COPR rebuilt `dux-qt-base-git` from `0.4.73^962.git75d4524` to `0.4.74^967.git1f768a3` (#162). Run 45553885679 failed the `image` job on that drift, and the printed diff names `manifests/packages-common.lock:14` as the entire difference. No manifest, build step or image behaviour changes.
 
 - Rewrite the README for what the repo is now: one tree, two Fedora bootc roles. It states the desktop and server split in one table (build file, extra manifest, module, what each ships, accounts, image gate), then what the pair is for: one drive per host, agents never on the host, one route in over the tailnet, and updates inside a window. The status table gains rows for the server image and the tailnet, and the first-login screenshot is removed because one role is now a headless host with no desktop to show. The GitHub description changes to name both images.
