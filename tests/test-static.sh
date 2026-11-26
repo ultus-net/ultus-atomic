@@ -412,24 +412,35 @@ elif ! grep -qF 'the lock measurement failed' "$repo_root/tests/verify-image.sh"
    ! grep -qF 'the package lock has no third-party lines' "$repo_root/tests/verify-image.sh"; then
   echo "FAIL tests/verify-image.sh does not separate a failed measurement from drift" >&2
   failures=$((failures + 1))
-elif ! grep -qF "awk '!index(\$0, \"+git\")'" "$repo_root/build/package-lock.sh"; then
-  echo "FAIL the lock generator does not drop +git builds" >&2
+elif ! grep -qF 'lock-filter.awk' "$repo_root/build/package-lock.sh" ||
+   ! grep -qF 'lock-filter.awk' "$repo_root/build/compare-lock.sh" ||
+   ! grep -qF '\^[0-9]+\.git[0-9a-f]+' "$repo_root/build/lock-filter.awk"; then
+  echo "FAIL the lock generator and comparator do not share the unpinnable-NEVRA filter" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'rpmfusion-[a-z]*\)-updates$' "$repo_root/build/package-lock.sh"; then
+  echo "FAIL the lock generator does not record an RPM Fusion updates package under its project" >&2
   failures=$((failures + 1))
 else
-  echo "ok   the lock is written atomically, drift is separated from a failed measurement, and the generator drops +git builds"
+  echo "ok   the lock is written atomically, drift is separated from a failed measurement, and the shared filter drops unpinnable snapshots"
 fi
 
 # The comparison is one helper so tests/test-lock-drift.sh can run it with no
-# image. Pin the call, the operator's drift message, and the branch that keeps a
-# failed measurement apart from drift, so a later edit cannot collapse them.
+# image. Pin the call, the operator's two messages, the warn-only branch, and the
+# branch that keeps a failed measurement apart from a set change, so a later edit
+# cannot collapse them.
 if ! grep -qF 'build/compare-lock.sh' "$repo_root/tests/verify-image.sh" ||
-   ! grep -qF "FAIL the third-party package lock drifted; run 'just lock'" "$repo_root/tests/verify-image.sh" ||
+   ! grep -qF 'FAIL the third-party lock set changed: a package appeared, disappeared, or changed origin repository' "$repo_root/tests/verify-image.sh" ||
    ! grep -qF 'elif ((compare_status != 0))' "$repo_root/tests/verify-image.sh" ||
+   ! grep -qF 'elif [[ -n $compare_detail ]]' "$repo_root/tests/verify-image.sh" ||
    ! grep -qF 'FAIL the lock measurement failed; the generator or the image is broken' "$repo_root/tests/verify-image.sh"; then
-  echo "FAIL tests/verify-image.sh no longer calls build/compare-lock.sh or lost the drift and failed-measurement messages" >&2
+  echo "FAIL tests/verify-image.sh no longer calls build/compare-lock.sh, or lost the set-change message, the warn-only branch, or the failed-measurement branch" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'warning: the third-party lock records an older build' "$repo_root/build/compare-lock.sh" ||
+   ! grep -qF 'pair_key' "$repo_root/build/compare-lock.sh"; then
+  echo "FAIL build/compare-lock.sh lost the warn-only rebuild path or the package pair key" >&2
   failures=$((failures + 1))
 else
-  echo "ok   the lock comparison runs through build/compare-lock.sh and keeps both diagnoses"
+  echo "ok   the lock comparison runs through build/compare-lock.sh, blocks a set change, and warns on a rebuild"
 fi
 
 # Secure Boot needs no per-machine enrollment only while the base keeps Fedora's
