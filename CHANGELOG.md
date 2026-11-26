@@ -2,13 +2,7 @@
 
 ## Unreleased
 
-- Record where each headless-server part shipped and tick both plans (part 1
-  `docs/superpowers/plans/2026-11-20-headless-server-part-1-base-and-image.md`,
-  part 2 `docs/superpowers/plans/2026-11-20-headless-server-part-2-server-behaviour.md`).
-  Neither plan had a ticked step after its part merged, so an unticked box read
-  as open work. A plan is the historical record now, and open work lives only in
-  #149's parts and open-work tables. The one remaining undocumented piece, the
-  OpenCode image move and the digest update path, became #163.
+- Tick both headless-server plans, because each merged with every step unticked. Part 1 (`docs/superpowers/plans/2026-11-20-headless-server-part-1-base-and-image.md`) shipped in PR #150 and part 2 (`docs/superpowers/plans/2026-11-20-headless-server-part-2-server-behaviour.md`) in PR #162, against 28 and 61 steps respectively. Each plan now opens with its PR, its merge commit and the rule that a plan records how a part shipped. #149's parts and open-work tables are the only live view of state, so an unticked box can no longer read as open work. The unowned OpenCode image move and digest update path is tracked as #163.
 
 - Refresh the third-party package lock after the duxlabs COPR rebuilt `dux-qt-base-git` from `0.4.73^962.git75d4524` to `0.4.74^967.git1f768a3` (#162). Run 45553885679 failed the `image` job on that drift, and the printed diff names `manifests/packages-common.lock:14` as the entire difference. No manifest, build step or image behaviour changes.
 
