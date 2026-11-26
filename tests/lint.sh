@@ -54,6 +54,7 @@ bash_scripts=(
   modules/server/usr/libexec/ultus-atomic/build.d/50-server.sh
   modules/server/usr/libexec/ultus/ultus-data-prepare
   modules/server/usr/libexec/ultus/ultus-env
+  modules/server/usr/libexec/ultus/opencode-service-config
   modules/server/usr/libexec/ultus/ultus-tailnet
   modules/server/usr/libexec/ultus/ultus-health
   modules/server/usr/libexec/ultus/ultus-backup

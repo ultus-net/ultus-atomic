@@ -16,6 +16,8 @@
 # SERVER_DISK=1 also writes $out/qcow2/data.qcow2, a sparse 8 GiB ext4 file
 # labelled ultus-data, because every server workload starts only when /var/srv
 # is a mountpoint and the boot test needs that second disk to prove it.
+# SERVER_DATA_LABEL and SERVER_DATA_FILE build the boot test's negative control:
+# the same disk under a label the mount unit must refuse.
 
 set -euo pipefail
 
@@ -24,12 +26,19 @@ image=${1:-localhost/ultus-atomic:dev}
 out=${2:-$repo_root/output}
 test_user=${TEST_USER:-dux}
 test_password=${TEST_PASSWORD:-dux-test}
+# DATA_ONLY=1 writes the data disk and nothing else, so the boot test's negative
+# control costs seconds instead of a second bootc-image-builder run.
+data_only=${DATA_ONLY:-0}
+if [[ $data_only == 1 && ${SERVER_DISK:-0} != 1 ]]; then
+  echo "DATA_ONLY=1 needs SERVER_DISK=1" >&2
+  exit 2
+fi
 mkdir -p "$out"
 # Podman reads a relative bind source as a named volume, so the argument the
 # header documents has to become an absolute path before it reaches -v.
 out=$(cd "$out" && pwd)
 
-if ! podman image exists "$image"; then
+if [[ $data_only == 0 ]] && ! podman image exists "$image"; then
   echo "image $image is not in rootful podman storage" >&2
   echo "copy it in with: podman save $image | sudo podman load" >&2
   exit 2
@@ -95,29 +104,38 @@ if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
   security_args+=(--security-opt label=type:unconfined_t)
 fi
 
-podman run --rm --privileged \
-  "${security_args[@]}" \
-  "${config_args[@]}" \
-  -v "$out:/output" \
-  -v /var/lib/containers/storage:/var/lib/containers/storage \
-  "$bib_image" \
-  build "$image" --type qcow2 --rootfs btrfs --use-librepo=True --output /output \
-  --chown "${SUDO_UID:-0}:${SUDO_GID:-0}"
+if [[ $data_only == 0 ]]; then
+  podman run --rm --privileged \
+    "${security_args[@]}" \
+    "${config_args[@]}" \
+    -v "$out:/output" \
+    -v /var/lib/containers/storage:/var/lib/containers/storage \
+    "$bib_image" \
+    build "$image" --type qcow2 --rootfs btrfs --use-librepo=True --output /output \
+    --chown "${SUDO_UID:-0}:${SUDO_GID:-0}"
+fi
 
 # The server units are gated on /var/srv being a mountpoint, so the boot test
 # needs a second drive carrying the data label. A sparse file plus one ext4
 # filesystem costs only the metadata; the guest fills the rest at runtime.
 if [[ $server_disk == 1 ]]; then
-  data_disk=$out/qcow2/data.qcow2
+  data_file=${SERVER_DATA_FILE:-data.qcow2}
+  data_label=${SERVER_DATA_LABEL:-ultus-data}
+  # The file name is a name, never a path: the disk belongs beside the OS disk.
+  if [[ $data_file == */* || -z $data_file ]]; then
+    echo "SERVER_DATA_FILE must be a file name, not a path: $data_file" >&2
+    exit 2
+  fi
+  data_disk=$out/qcow2/$data_file
   rm -f "$data_disk"
   truncate -s 8G "$data_disk"
-  mkfs.ext4 -q -F -L ultus-data "$data_disk"
+  mkfs.ext4 -q -F -L "$data_label" "$data_disk"
   chown "${SUDO_UID:-0}:${SUDO_GID:-0}" "$data_disk"
   label=$(blkid -p -o value -s LABEL "$data_disk")
   fstype=$(blkid -p -o value -s TYPE "$data_disk")
   echo "data disk: $data_disk (label=$label type=$fstype)" >&2
-  if [[ $label != ultus-data || $fstype != ext4 ]]; then
-    echo "data disk is not ext4 labelled ultus-data" >&2
+  if [[ $label != "$data_label" || $fstype != ext4 ]]; then
+    echo "data disk is not ext4 labelled $data_label" >&2
     exit 1
   fi
 fi

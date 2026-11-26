@@ -17,6 +17,9 @@ Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=OPENCODE_IMAGE=ghcr.io/ultus-net/devbox@sha256:8649976df3ebbd38f8b6b323b2a8522cb7de6021e969f836ed57c0cf4ab5e81a
 EnvironmentFile=/run/ultus/opencode.env
 EnvironmentFile=-/var/srv/ultus/workloads.env
+# `serve --service` reads its basic-auth password from service.json, not from
+# OPENCODE_PASSWORD. Seed that file from the secret before the container starts.
+ExecStartPre=/usr/libexec/ultus/opencode-service-config
 ExecStart=/usr/bin/podman run --rm --name opencode \
   --userns=keep-id -u 1000 -e HOME=/home/dev \
   --read-only \

@@ -23,10 +23,13 @@ Then confirm the data disk before anything else:
 
 ```bash
 findmnt /var/srv
+ls -l /srv
 systemctl status var-srv.mount ultus-data-prepare.service
 ```
 
-`findmnt` prints the partition's source and `ultus-data`. `ultus-data-prepare.service` creates `/var/srv/ultus` as `0700 root:root`, `/var/srv/{opencode,hermes,repos}` as `0750 agents:agents`, and one state directory per workload as `0700 agents:agents`. A unit that is `inactive (dead)` with result `condition failed` means the mount is absent, not that the unit is broken.
+`findmnt` prints the partition's source and `ultus-data`. `/srv` is the base image's symlink to `/var/srv`, so an app that writes to `/srv` lands on the data disk; `ls -l /srv` should print `var/srv`. `ultus-data-prepare.service` creates `/var/srv/ultus` as `0700 root:root`, `/var/srv/{opencode,hermes,repos}` as `0750 agents:agents`, and one state directory per workload as `0700 agents:agents`. A unit that is `inactive (dead)` with result `condition failed` means the mount is absent, not that the unit is broken.
+
+`var-srv.mount` names `LABEL=ultus-data`, so a partition formatted without that label is never mounted and the workloads stay down. That is the intended outcome: the alternative is agent state on the OS disk, which the backup would then store as an empty tree.
 
 ## The secrets file
 
@@ -40,6 +43,8 @@ Write `/var/srv/ultus/secrets.env` as root, mode `0600`, owned `root:root`. The 
 | `HERMES_DASHBOARD_BASIC_AUTH_USERNAME`, `..._PASSWORD`, `..._SECRET` | Hermes | Dashboard login. Optional. |
 | `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN` | Hermes | Chat gateway. Optional. |
 | `TZ` | both | Container timezone. Optional. |
+
+`opencode.service` runs `serve --service`, which reads its basic-auth password from `service.json` rather than the environment. The unit seeds `/var/srv/opencode/config/service.json` from `OPENCODE_PASSWORD` before the container starts. The file is on the data disk, so the password survives a reboot and a deployment rollback, and Hermes receives the same value. A missing or unreadable file fails the unit rather than leaving the server on a generated password no operator knows.
 
 Each workload gets its own file and no other workload's keys:
 

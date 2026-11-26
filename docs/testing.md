@@ -151,6 +151,7 @@ The server boot test is not a gate on its own; CI runs it inside `image-server`.
 | Marker | Asserts |
 | --- | --- |
 | `ULTUS_MOUNT:ok` | `/var/srv` is a mountpoint |
+| `ULTUS_SRV:ok` | `/srv` resolves to `/var/srv`, that path is on the data disk's filesystem, and the data disk is not the OS disk; the marker prints all four values |
 | `ULTUS_LINGER:yes` | `agents` lingers, so rootless Podman has a runtime directory |
 | `ULTUS_OWNER:1000` | A container's write under `/var/srv/opencode/share` lands owned by `agents`, not root |
 | no `ULTUS_CANARY:*:readable` | A workload container cannot read `/home/<test account>`, `/root/.ssh`, the Podman socket or `/dev/kvm` |
@@ -158,22 +159,31 @@ The server boot test is not a gate on its own; CI runs it inside `image-server`.
 | `ULTUS_REPO:ok` | The one-time `restic init` succeeds, so the backup unit has a repository to write into |
 | `ULTUS_BACKUP:0` | The backup unit exits 0, so a window really wrote a snapshot |
 | `ULTUS_RESTORE:ok` | The snapshot restores a canary file, so the repository holds the tree rather than an empty mount |
+| `ULTUS_SERVICE_PASSWORD:ok` | `service.json` on the data disk carries the operator's `OPENCODE_PASSWORD`, so `serve --service` accepts the documented password instead of a generated one |
+| `ULTUS_SESSION:ok` | The OpenCode server answers on `127.0.0.1:4096/api/session` with that password and creates a session; the guest keeps its id on the data disk |
+| `ULTUS_SESSION_READ:ok` | After the reboot the guest reads that id back and the server returns the session with the `pre-window` title it was created with, so the workload resumes client work |
 | `ULTUS_REBOOT_MARKER:ok`, `ULTUS_REBOOT_ACTIVE:ok` | The data disk and both workloads survive a guest reboot |
-| `ULTUS_NODISK_*` | With no data drive, `/var/srv` is not a mountpoint, systemd refused both workload starts (`ConditionResult=no`, not a crash), no container is left behind, and `/var/srv/ultus` is not created on the OS disk |
+| `ULTUS_NODISK_*` | With no data drive, `var-srv.mount` refuses the start (`UNIT:refused` reports `ConditionResult=no` and a non-active state, not a crash), `/var/srv` is not a mountpoint, systemd refused both workload starts (`CONDITION:no`), no container is left behind, and `/var/srv/ultus` is not created on the OS disk |
+| `ULTUS_NOLABEL_*` | With a drive whose label is `ultus-data-wrong`, the guest sees that label and udev publishes it under by-label (`PREMISE:seen`, `WRONG:present`), `var-srv.mount` names `/dev/disk/by-label/ultus-data` (`WHAT:matches`), no device carries that label (`LABEL:none`), so the unit refused the start (`UNIT:refused`, `ConditionResult=no`) and both workloads stay down with nothing written to the OS disk |
+
+On a hosted runner the guest runs under QEMU TCG, which cannot execute every instruction OpenCode's runtime emits: run 45780444809's second boot aborted the server with `trap invalid opcode`, so the two session markers read `skipped-tcg` there rather than failing the job. A skip marker records that the probe did not run, not that the API passed. The KVM run and the hardware UAT in #149 carry that proof.
 
 It builds its own disk inputs:
 
 ```bash
 sudo SERVER_DISK=1 tests/vm/make-disk.sh localhost/ultus-atomic-server:dev
+sudo SERVER_DISK=1 DATA_ONLY=1 SERVER_DATA_LABEL=ultus-data-wrong \
+  SERVER_DATA_FILE=data-unlabelled.qcow2 \
+  tests/vm/make-disk.sh localhost/ultus-atomic-server:dev
 SERVER_DATA_DISK=$PWD/output/qcow2/data.qcow2 QEMU_NO_REBOOT=0 \
   sudo -E tests/vm/boot-smoke-server.sh output/qcow2/disk.qcow2 .vm/server-boot.log
 ```
 
-`SERVER_DISK=1` adds the test account to `wheel`, because the probes drive system units, and writes `output/qcow2/data.qcow2`: a sparse 8 GiB file carrying an ext4 filesystem labelled `ultus-data`. It refuses to run with `NO_TEST_USER=1`.
+`SERVER_DISK=1` adds the test account to `wheel`, because the probes drive system units, and writes `output/qcow2/data.qcow2`: a sparse 8 GiB file carrying an ext4 filesystem labelled `ultus-data`. It refuses to run with `NO_TEST_USER=1`. `SERVER_DATA_LABEL` and `SERVER_DATA_FILE` name the label and the file, and `DATA_ONLY=1` writes that data file without rebuilding the OS disk, which is how the unlabelled control is made. The boot test refuses to run without both disks, because either one going missing would turn a stage into a weaker test.
 
-`QEMU_NO_REBOOT=0` is required: the script reboots the guest and logs in again, and QEMU must survive that. The snapshot stays on, so the guest's writes survive the reboot inside the run and the source disk is untouched. The script then starts a second QEMU with no data drive, which is the failed-mount case.
+`QEMU_NO_REBOOT=0` is required: the script reboots the guest and logs in again, and QEMU must survive that. The snapshot stays on, so the guest's writes survive the reboot inside the run and the source disk is untouched. The script then starts a second QEMU with no data drive, and a third with the unlabelled disk.
 
-The test boots the guest three times: with the data disk, after a reboot inside that run, and with no data disk. It pulls both workload images from inside the guest, so it needs outbound HTTPS to `ghcr.io` and `docker.io` and a larger budget than the desktop boot. On a host without `/dev/kvm`, set `BOOT_TIMEOUT=2700`.
+The test boots the guest four times: with the data disk, after a reboot inside that run, with no data disk, and with the unlabelled disk. It pulls both workload images from inside the guest, so it needs outbound HTTPS to `ghcr.io` and `docker.io` and a larger budget than the desktop boot. On a host without `/dev/kvm`, set `BOOT_TIMEOUT=2700`. It needs a provider key only for the Hermes unit, not for the session it opens: the OpenCode server creates a session without calling a model.
 
 ## CI boot test
 
