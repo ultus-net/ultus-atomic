@@ -257,6 +257,23 @@ if [[ $state != disabled ]]; then
   echo "FAIL sshd.service is '${state}', expected disabled" >&2
   exit 1
 fi
+# The spec bakes Tailscale into every role, so the daemon is enabled in every
+# image. The package is in the shared manifest and the block above resolves it.
+# Enabling the unit joins no tailnet (#151).
+state=$("$runtime" run --rm "$image" systemctl is-enabled tailscaled.service 2>&1 || true)
+if [[ $state != enabled ]]; then
+  echo "FAIL tailscaled.service is '${state}', expected enabled" >&2
+  exit 1
+fi
+# tailscaled keeps its node key and state under /var/lib/tailscale, and the
+# package creates that directory empty. A state file in the image would make
+# every host boot as the same tailnet node, so assert the directory is empty
+# rather than absent (#151).
+state_files=$("$runtime" run --rm "$image" ls -A /var/lib/tailscale 2>/dev/null || true)
+if [[ -n $state_files ]]; then
+  echo "FAIL the image ships tailscaled state: ${state_files}" >&2
+  exit 1
+fi
 # Secure Boot needs no per-machine enrollment only while the base keeps Fedora's
 # kernel and modules. The signature is the whole difference between that base
 # and a base that ships its own signed kernel, so check the issuer here (#65).
