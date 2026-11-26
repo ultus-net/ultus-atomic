@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status: shipped.** Part 1 merged in PR #150 (`00d0f6a`). Every step below is
+> ticked because it landed. This file is the historical plan, not a tracker. The
+> live view of the work is #149's parts table, and any remaining work has its own
+> issue.
+
 **Goal:** Create `ultus-atomic-server` as a third published-candidate image whose base carries no desktop, no gaming, and no developer toolchain, and prove the desktop image still installs exactly what it did.
 
 **Architecture:** File-per-host, the pattern `Containerfile.nvidia` already uses. Each Containerfile copies one module tree by name, so a host cannot inherit another host's module. `packages-common.txt` becomes the server-safe base; desktop-only groups move to `packages-desktop.txt`, which the desktop module hook already installs. The server module starts with one unit, the data-disk mount, so this part ends with a bootable server image that mounts `/var/srv` and carries nothing else.
@@ -66,7 +71,7 @@ These are the input classes and failure modes the spec implies but no unit test 
 - Consumes: nothing from earlier tasks.
 - Produces: `manifests/packages-server.txt` exists and holds `restic`. `packages-common.txt` holds `tailscale` and holds no name from `packages-desktop.txt`. The desktop hook installs the Flathub remote.
 
-- [ ] **Step 1: Write the failing role assertions in `tests/test-static.sh`**
+- [x] **Step 1: Write the failing role assertions in `tests/test-static.sh`**
 
 Add after the existing `packages-common.txt` one-package-per-line block:
 
@@ -95,12 +100,12 @@ else
 fi
 ```
 
-- [ ] **Step 2: Run the static gate to verify it fails**
+- [x] **Step 2: Run the static gate to verify it fails**
 
 Run: `tests/test-static.sh`
 Expected: FAIL with `manifests/packages-server.txt is missing`.
 
-- [ ] **Step 3: Move the desktop groups out of the base**
+- [x] **Step 3: Move the desktop groups out of the base**
 
 Cut these names from `manifests/packages-common.txt` and append them under their existing group comments in `manifests/packages-desktop.txt`:
 
@@ -117,7 +122,7 @@ Keep in the base: `firewalld`, `zram-generator-defaults`, `tmux`, `htop`, `btop`
 
 In `packages-desktop.txt`, keep the existing header and rename the first group comment to `# Session services, compositor, shell, greeter and terminal`, keeping every existing name.
 
-- [ ] **Step 4: Create `manifests/packages-server.txt`**
+- [x] **Step 4: Create `manifests/packages-server.txt`**
 
 ```text
 # packages-server.txt — host tools the server needs and no other role does.
@@ -126,11 +131,11 @@ In `packages-desktop.txt`, keep the existing header and rename the first group c
 restic
 ```
 
-- [ ] **Step 5: Move the Flathub seed into the desktop hook**
+- [x] **Step 5: Move the Flathub seed into the desktop hook**
 
 Delete `build/common.sh` lines 73-77 (the `install -d /etc/flatpak/remotes.d` block and its comment). Add the same block to `modules/desktop/usr/libexec/ultus-atomic/build.d/50-desktop.sh`, before the COPR block, with the comment `# The desktop installs user applications from Flathub; the server has no Flatpak`.
 
-- [ ] **Step 6: Point the Node assertion at the desktop manifest**
+- [x] **Step 6: Point the Node assertion at the desktop manifest**
 
 In `tests/test-static.sh`, the check at line 262 reads `$manifest` (which is `packages-common.txt` at line 53). Change its two manifest greps to use the desktop manifest declared at the top of the file instead:
 
@@ -141,16 +146,16 @@ if ! grep -qx 'nodejs' "$repo_root/manifests/packages-desktop.txt" ||
 
 Leave the four `verify-image.sh` greps in that block untouched.
 
-- [ ] **Step 7: Run the static gate to verify it passes**
+- [x] **Step 7: Run the static gate to verify it passes**
 
 Run: `tests/test-static.sh`
 Expected: `static checks passed`, including `ok   the base names tailscale and no desktop package, and the server names restic`.
 
-- [ ] **Step 8: Update the docs and changelog**
+- [x] **Step 8: Update the docs and changelog**
 
 Add to `CHANGELOG.md` under the unreleased heading: `- Split the package manifests into a server-safe base, a desktop set, and a server set; Tailscale is now in every image.` Update `docs/build.md` where it describes the manifest split: name the three manifests, say which hook installs `packages-desktop.txt`, and state that `packages-server.txt` is installed through `PACKAGE_MANIFEST_EXTRA`.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add manifests/ build/common.sh modules/desktop/usr/libexec/ultus-atomic/build.d/50-desktop.sh tests/test-static.sh CHANGELOG.md docs/build.md
@@ -174,7 +179,7 @@ git commit -m "refactor: split the package manifests by role (#149)"
 - Consumes: `manifests/packages-server.txt` from Task 1.
 - Produces: `Containerfile.server` with `PACKAGE_MANIFEST_EXTRA=packages-server.txt`, a `FROM` line carrying the same digest as the other two, and exactly one `COPY modules/server /modules/server` line. `modules/server/` exists and holds one unit.
 
-- [ ] **Step 1: Write the failing static assertions**
+- [x] **Step 1: Write the failing static assertions**
 
 Replace the ctx-tree block in `tests/test-static.sh` with a loop over every Containerfile:
 
@@ -222,20 +227,20 @@ else
 fi
 ```
 
-- [ ] **Step 2: Run the static gate to verify it fails**
+- [x] **Step 2: Run the static gate to verify it fails**
 
 Run: `tests/test-static.sh`
 Expected: FAIL with `Containerfile does not copy modules/desktop` or `does not copy exactly one module tree by name`.
 
-- [ ] **Step 3: Switch the two existing Containerfiles to named module copies**
+- [x] **Step 3: Switch the two existing Containerfiles to named module copies**
 
 In `Containerfile` line 20, replace `COPY modules /modules` with `COPY modules/desktop /modules/desktop`. In `Containerfile.nvidia` line 12, do the same.
 
-- [ ] **Step 4: Create `Containerfile.server`**
+- [x] **Step 4: Create `Containerfile.server`**
 
 Copy `Containerfile.nvidia` and change three things: drop the `ENV PACKAGE_MANIFEST_EXTRA` value to `packages-server.txt`, replace the module COPY with `COPY modules/server /modules/server`, and update the header comment to say this image is the headless server. The `FROM` digest, the `RUN --mount` line, and the trailing `RUN bootc container lint` stay identical to the desktop file.
 
-- [ ] **Step 5: Create the server module's first unit**
+- [x] **Step 5: Create the server module's first unit**
 
 `modules/server/usr/lib/systemd/system/var-srv.mount`:
 
@@ -258,27 +263,27 @@ WantedBy=local-fs.target
 
 Add a comment above `[Unit]` naming the reason for `/var/srv`: `/srv` is a symlink in the base image and systemd refuses to mount on a symlinked path.
 
-- [ ] **Step 6: Extend the repin workflow**
+- [x] **Step 6: Extend the repin workflow**
 
 In `.github/workflows/repin-base.yml`, add `$repo_root/Containerfile.server` to the `sed -E ... -i` list and to `git add`. Change the comment `# Rewrite both Containerfiles atomically` to `# Rewrite every Containerfile atomically`.
 
-- [ ] **Step 7: Run the static gate to verify it passes**
+- [x] **Step 7: Run the static gate to verify it passes**
 
 Run: `tests/test-static.sh`
 Expected: `static checks passed`, including `ok   every Containerfile copies one module tree by name` and `ok   every Containerfile carries the same base pin`.
 
-- [ ] **Step 8: Build the server image**
+- [x] **Step 8: Build the server image**
 
 Run: `podman build -f Containerfile.server -t localhost/ultus-atomic-server:dev .`
 Expected: the build completes. Then `podman run --rm localhost/ultus-atomic-server:dev test -f /usr/lib/systemd/system/var-srv.mount` exits 0, and `podman run --rm localhost/ultus-atomic-server:dev systemctl is-enabled var-srv.mount` prints `enabled`. A unit left disabled by the build is a `[Install]` bug, not a test bug.
 
 If the image build fails because the unit is not enabled, check that the module tree landed at `/modules/server` and not `/modules`: `podman run --rm localhost/ultus-atomic-server:dev ls /usr/lib/systemd/system/var-srv.mount`.
 
-- [ ] **Step 9: Update the docs and changelog**
+- [x] **Step 9: Update the docs and changelog**
 
 Add `- Add Containerfile.server and modules/server, and copy one module tree per Containerfile.` to `CHANGELOG.md`. In `docs/build.md`, add the server row to whatever table names the images, and replace the "the build copies every `modules/*` tree" sentence with the named-copy rule.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add Containerfile Containerfile.nvidia Containerfile.server modules/server tests/test-static.sh .github/workflows/repin-base.yml CHANGELOG.md docs/build.md
@@ -299,7 +304,7 @@ git commit -m "feat: add the server image and one module copy per host (#149)"
 - Consumes: `Containerfile.server` and `modules/server/` from Task 2.
 - Produces: `tests/verify-image.sh --server` exits 0 only for an image with no desktop package, `var-srv.mount` present and enabled, `tailscale` and `restic` installed, and no Flathub remote. `manifests/packages-server.lock` holds exactly the two RPM Fusion release entries.
 
-- [ ] **Step 1: Write the failing server verification**
+- [x] **Step 1: Write the failing server verification**
 
 In `tests/verify-image.sh`, add `server=0` next to `headless=0` and a flag case:
 
@@ -343,12 +348,12 @@ lock=$repo_root/manifests/packages-common.lock
 ((server)) && lock=$repo_root/manifests/packages-server.lock
 ```
 
-- [ ] **Step 2: Run the verifier against the server image to watch it fail**
+- [x] **Step 2: Run the verifier against the server image to watch it fail**
 
 Run: `tests/verify-image.sh --server localhost/ultus-atomic-server:dev`
 Expected: FAIL with `manifests/packages-server.lock: No such file` (or the `var-srv.mount` line if the unit is missing).
 
-- [ ] **Step 3: Generate the server lock**
+- [x] **Step 3: Generate the server lock**
 
 Run:
 
@@ -359,12 +364,12 @@ mv manifests/packages-server.lock.tmp manifests/packages-server.lock
 
 Then edit the header's first line to `# manifests/packages-server.lock - regenerate with build/package-lock.sh <image>`. Expected content: the two-line header plus `rpmfusion-free-release-0:45-2.noarch  @commandline` and `rpmfusion-nonfree-release-0:45-2.noarch  @commandline`, tab-separated. Anything else is a role leak: stop and fix the manifest instead of writing the lock.
 
-- [ ] **Step 4: Run the verifier to verify it passes**
+- [x] **Step 4: Run the verifier to verify it passes**
 
 Run: `tests/verify-image.sh --server localhost/ultus-atomic-server:dev`
 Expected: `ok   the server image carries no desktop package and mounts its data disk` and `ok   package lock comparison ...` with no drift.
 
-- [ ] **Step 5: Prove the desktop image is unchanged**
+- [x] **Step 5: Prove the desktop image is unchanged**
 
 Build the desktop image from the branch head and compare against the last `main` build:
 
@@ -375,7 +380,7 @@ podman run --rm localhost/ultus-atomic:split rpm -qa | sort > .tmp-after.txt
 
 Expected: `.tmp-after.txt` equals the pre-split set plus `tailscale`, and `manifests/packages-common.lock` is unchanged (`git diff --exit-code manifests/packages-common.lock`). Build the pre-split image once from `origin/main` into `localhost/ultus-atomic:before` and diff the two sorted lists to confirm. Record both checks in the commit message, then `rm .tmp-after.txt` before committing so the tree stays clean.
 
-- [ ] **Step 6: Add the CI path filter and job**
+- [x] **Step 6: Add the CI path filter and job**
 
 In `.github/workflows/ci.yml`: add `server: ${{ steps.server.outputs.server }}` to the `changes` job outputs, and a `changes` step whose regex is
 
@@ -385,16 +390,16 @@ regex='^(Containerfile$|Containerfile\.server$|build/|overlay/|modules/|manifest
 
 Then add a `image-server` job modelled on `image-nvidia` (`ci.yml:271-310`): filter on `needs.changes.outputs.server`, build with `podman build --layers -f Containerfile.server -t localhost/ultus-atomic-server:ci .`, and run `tests/verify-image.sh --server localhost/ultus-atomic-server:ci`. Do not add publishing in this task.
 
-- [ ] **Step 7: Lint the workflows and gates**
+- [x] **Step 7: Lint the workflows and gates**
 
 Run: `tests/lint.sh && tests/test-static.sh`
 Expected: both pass. A YAML error in `ci.yml` surfaces here.
 
-- [ ] **Step 8: Update the docs and changelog**
+- [x] **Step 8: Update the docs and changelog**
 
 Add `- Verify the server image in CI with its own lock and path filter.` to `CHANGELOG.md`. In `docs/testing.md`, add a row to the gate table naming `tests/verify-image.sh --server` and what it asserts, and note that the server VM slice is a later part.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add tests/verify-image.sh manifests/packages-server.lock .github/workflows/ci.yml CHANGELOG.md docs/testing.md
