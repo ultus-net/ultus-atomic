@@ -98,6 +98,19 @@ else
   echo "ok   the base names tailscale and no desktop package, and the server names restic"
 fi
 
+# Every Containerfile runs build/common.sh, so an enable there reaches all
+# three roles. A module-level enable would leave one role without a daemon,
+# which only the image gate would catch (#151).
+if ! grep -qx 'systemctl enable tailscaled.service' "$repo_root/build/common.sh"; then
+  echo "FAIL build/common.sh does not enable tailscaled.service for every image" >&2
+  failures=$((failures + 1))
+elif ! grep -qF 'systemctl is-enabled tailscaled.service' "$repo_root/tests/verify-image.sh"; then
+  echo "FAIL tests/verify-image.sh does not check that tailscaled.service is enabled" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   every image enables tailscaled.service, and the image gate checks it"
+fi
+
 # The server runs its agents as a dedicated rootless user. A missing linger flag
 # means no runtime directory, so rootless Podman cannot start; a missing range
 # means containers cannot map their own users. Both are silent at build time, so
