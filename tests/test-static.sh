@@ -156,14 +156,23 @@ fi
 
 # A hosted runner has no /dev/kvm, and OpenCode's runtime aborts under QEMU TCG
 # (run 45780444809, trap invalid opcode), so the session assertions must state
-# their skip instead of failing the job. Pin the guard, both markers, and the
-# post-reboot selection, because a deleted guard would read as a green boot that
-# proved nothing (#164).
-if ! grep -qF 'if [[ $accel != kvm ]]; then' "$server_boot_test" ||
-   ! grep -qF 'ULTUS_SESSION:skipped-tcg' "$server_boot_test" ||
-   ! grep -qF 'ULTUS_SESSION_READ:skipped-tcg' "$server_boot_test" ||
-   ! grep -qF '"$session_read_marker"' "$server_boot_test"; then
-  echo "FAIL boot-smoke-server.sh does not skip the session assertions on TCG and name the skip" >&2
+# their skip instead of failing the job. A text check alone would pass for a
+# branch that skipped unconditionally, so pin the guard's body, its single
+# assignment, both markers, and the KVM probes that must stay beside them
+# (#164).
+session_guard_ok=0
+if [[ $(grep -cF 'session_skip=1' "$server_boot_test") == 1 ]] &&
+   awk '/^if \[\[ \$accel != kvm \]\]; then$/ { getline; if ($0 == "  session_skip=1") found = 1 }
+        END { exit found ? 0 : 1 }' "$server_boot_test" &&
+   grep -qF 'ULTUS_SESSION:skipped-tcg' "$server_boot_test" &&
+   grep -qF 'ULTUS_SESSION_READ:skipped-tcg' "$server_boot_test" &&
+   grep -qF '"$session_read_marker"' "$server_boot_test" &&
+   grep -qF 'ULTUS_SESSION:(ok|missing)' "$server_boot_test" &&
+   grep -qF 'ULTUS_SESSION_READ:(ok|missing)' "$server_boot_test"; then
+  session_guard_ok=1
+fi
+if ((session_guard_ok == 0)); then
+  echo "FAIL boot-smoke-server.sh does not skip the session assertions only on TCG, or lost the KVM probes" >&2
   failures=$((failures + 1))
 else
   echo "ok   the server boot test skips the session API on TCG and says so"
