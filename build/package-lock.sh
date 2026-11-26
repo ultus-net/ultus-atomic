@@ -7,12 +7,14 @@
 # Contract: one line per resolved NEVRA: <nevra> TAB <from_repo>.
 # Packages whose from_repo is empty, '@System', 'unknown', or a local path
 # (begins with '/') are excluded. Fedora-origin repositories are excluded so a
-# Fedora updates bump does not red the gate. +git builds are excluded.
+# Fedora updates bump does not red the gate. Git snapshots are excluded because
+# they cannot be pinned, and the caller sees each exclusion on stderr.
 
 set -euo pipefail
 
 image=${1:-localhost/ultus-atomic:dev}
 runtime=${CONTAINER_RUNTIME:-podman}
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 cat <<'HEADER'
 # manifests/packages-common.lock - regenerate with 'just lock'
@@ -23,6 +25,8 @@ cat <<'HEADER'
 # dependency-repo prefix to the main project prefix before recording. The
 # NEVRA still pins what landed, and a package moving between those two
 # repositories of the same COPR is therefore not drift.
+# RPM Fusion publishes an updates repository beside its release repository, so
+# the generator records the project there too. A normal update is not drift.
 HEADER
 
 # Run repoquery once inside the image. Pass an explicit '*' pattern so every
@@ -37,6 +41,9 @@ HEADER
   # resolution but refers to the same COPR project; record the project by
   # normalizing coprdep: to copr: so identical NEVRAs do not appear as drift.
   sed 's/^\([^\t]*\t\)coprdep:/\1copr:/' | \
+  # RPM Fusion's updates repository is the release repository's updates stream,
+  # so record the project and let a normal update stay out of the gate.
+  sed 's/^\([^\t]*\t\)\(rpmfusion-[a-z]*\)-updates$/\1\2/' | \
   LC_ALL=C sort -u | \
   # Denylist Fedora-owned or system origins only. Record everything else so an
   # unexpected repo id is visible rather than dropped. Exclude exactly:
@@ -45,5 +52,6 @@ HEADER
   # packages originating from the pinned base image and therefore cannot drift
   # inside that digest.
   awk -F"\t" 'tolower($2) == "" { next } tolower($2) == "<unknown>" { next } tolower($2) == "@system" { next } tolower($2) == "unknown" { next } tolower($2) == "fedora" { next } tolower($2) == "updates" { next } tolower($2) == "fedora-cisco-openh264" { next } $2 ~ /^\// { next } { print }' | \
-  # Drop +git NEVRAs (cannot be pinned)
-  awk '!index($0, "+git")'
+  # Drop the NEVRAs that cannot be pinned, and name each one so a new
+  # unpinnable package stays visible when the lock is regenerated.
+  awk -v note=1 -f "$script_dir/lock-filter.awk"
