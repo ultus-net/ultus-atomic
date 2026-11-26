@@ -135,6 +135,25 @@ for pair in 'opencode-env.service:opencode' 'hermes-env.service:hermes'; do
   fi
 done
 
+# `serve --service` ignores OPENCODE_PASSWORD and reads the basic-auth password
+# from service.json on the data disk. A unit that starts the server without
+# seeding that file comes up with a random password, so the operator and Hermes
+# cannot log in. Name the seed, its source and the API the boot test drives, so a
+# dropped line reds here instead of at the end of a long boot.
+opencode_unit=$repo_root/modules/server/usr/lib/systemd/system/opencode.service
+service_config=$repo_root/modules/server/usr/libexec/ultus/opencode-service-config
+server_boot_test=$repo_root/tests/vm/boot-smoke-server.sh
+if ! grep -qF 'ExecStartPre=/usr/libexec/ultus/opencode-service-config' "$opencode_unit" ||
+   ! grep -qF 'serve --service' "$opencode_unit" ||
+   ! grep -qF 'jq --arg password "$OPENCODE_PASSWORD"' "$service_config" ||
+   ! grep -qF 'ULTUS_SERVICE_PASSWORD:(ok|mismatch|missing)' "$server_boot_test" ||
+   ! grep -qF '/api/session' "$server_boot_test"; then
+  echo "FAIL opencode.service does not seed service.json from OPENCODE_PASSWORD before serve --service" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   opencode.service seeds the service password from the secret"
+fi
+
 tailnet_unit=$repo_root/modules/server/usr/lib/systemd/system/ultus-tailnet.service
 tailnet_script=$repo_root/modules/server/usr/libexec/ultus/ultus-tailnet
 missing_surfaces=()
@@ -798,6 +817,23 @@ if ! grep -qF "login: ' \"\$timeout_s\"" "$qemu_lib" ||
   failures=$((failures + 1))
 else
   echo "ok   the hosted boot budget covers a slow TCG login"
+fi
+
+# The server boot test proves the role against three disk inputs: a data disk
+# labelled ultus-data, no disk, and a disk labelled ultus-data-wrong (#154). A
+# missed wiring drops the third stage into a second copy of the no-disk stage,
+# which passes while proving nothing, so name each half: the builder flags, the
+# CI step that passes the path, and the stage's own premise marker.
+if ! grep -qF 'SERVER_DATA_LABEL=ultus-data-wrong' "$ci_workflow" ||
+   ! grep -qF 'SERVER_UNLABELLED_DISK' "$ci_workflow" ||
+   ! grep -qF 'SERVER_UNLABELLED_DISK' "$server_boot" ||
+   ! grep -qF 'SERVER_DATA_LABEL:-ultus-data' "$repo_root/tests/vm/make-disk.sh" ||
+   ! grep -qF 'DATA_ONLY:-0' "$repo_root/tests/vm/make-disk.sh" ||
+   ! grep -qF 'ULTUS_NOLABEL_PREMISE:seen' "$server_boot"; then
+  echo "FAIL the server boot test's unlabelled-disk control is not wired end to end" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   the server boot test reaches an unlabelled data disk and CI builds one"
 fi
 
 # repin-base workflow assertions: file exists, weekly cron, dispatch input, probe and rewrite gating

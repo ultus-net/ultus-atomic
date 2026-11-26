@@ -338,9 +338,10 @@ jobs:
     needs: [static, changes]
     if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-24.04
-    # The boot test starts the guest three times: once with the data disk, once
-    # after a reboot inside that run, and once without the data disk. 240
-    # minutes bounds that; the desktop job needs 180 for a single boot.
+    # The boot test starts the guest four times: once with the data disk, once
+    # after a reboot inside that run, once without the data disk, and once with
+    # a disk carrying the wrong label. 240 minutes bounds that; the desktop job
+    # needs 180 for a single boot.
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -371,10 +372,18 @@ jobs:
           podman save localhost/ultus-atomic-server:ci -o .cache/server-image.tar
           sudo podman load -i .cache/server-image.tar
           sudo SERVER_DISK=1 tests/vm/make-disk.sh localhost/ultus-atomic-server:ci "$GITHUB_WORKSPACE/output"
+          # The boot test's negative control: a drive the mount unit must refuse
+          # because it does not carry the ultus-data label. DATA_ONLY skips the
+          # second bootc-image-builder run, which would rebuild the OS disk for a
+          # file it does not use.
+          sudo SERVER_DISK=1 DATA_ONLY=1 SERVER_DATA_LABEL=ultus-data-wrong \
+            SERVER_DATA_FILE=data-unlabelled.qcow2 \
+            tests/vm/make-disk.sh localhost/ultus-atomic-server:ci "$GITHUB_WORKSPACE/output"
 
       - name: Server boot smoke test
-        # TCG on a hosted runner, and this test boots the guest twice: a reboot
-        # inside the first run, then a second run with no data drive. The
+        # TCG on a hosted runner, and this test boots the guest four times: once
+        # with the data disk, once after a reboot inside that run, once with no
+        # data drive, and once with a drive carrying the wrong label. The
         # workload units pull their two images from the guest, so the job needs
         # outbound HTTPS to ghcr.io and docker.io; a runner without it fails at
         # the pull, and the diagnostics name the pull error.
@@ -383,6 +392,7 @@ jobs:
           QEMU_ACCEL: tcg
           QEMU_NO_REBOOT: '0'
           SERVER_DATA_DISK: ${{ github.workspace }}/output/qcow2/data.qcow2
+          SERVER_UNLABELLED_DISK: ${{ github.workspace }}/output/qcow2/data-unlabelled.qcow2
         run: |
           sudo -E tests/vm/boot-smoke-server.sh \
             "$GITHUB_WORKSPACE/output/qcow2/disk.qcow2" \
@@ -396,6 +406,7 @@ jobs:
           path: |
             .vm/server-boot.log
             .vm/server-boot-nodisk.log
+            .vm/server-boot-unlabelled.log
             .vm/qemu.err
           retention-days: 14
           if-no-files-found: ignore

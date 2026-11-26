@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Boot the server image under QEMU and prove the headless behaviour end to end.
 #
-# Needs qemu-system-x86_64, edk2-ovmf, and a second disk carrying an ext4
-# filesystem labelled ultus-data (tests/vm/make-disk.sh with SERVER_DISK=1).
+# Needs qemu-system-x86_64, edk2-ovmf, and two more disks: one carrying an ext4
+# filesystem labelled ultus-data, and one carrying any other label
+# (tests/vm/make-disk.sh with SERVER_DISK=1, twice).
 #
 #   SERVER_DATA_DISK=output/qcow2/data.qcow2 QEMU_NO_REBOOT=0 \
 #     tests/vm/boot-smoke-server.sh [disk.qcow2] [boot.log]
@@ -23,12 +24,21 @@ timeout_s=${BOOT_TIMEOUT:-1800}
 test_user=${TEST_USER:-dux}
 test_password=${TEST_PASSWORD:-dux-test}
 data_disk=${SERVER_DATA_DISK:-}
+# The negative control: a disk the image must refuse because it does not carry
+# the label var-srv.mount names. It sits beside the good one by default.
+unlabelled_disk=${SERVER_UNLABELLED_DISK:-${data_disk%.qcow2}-unlabelled.qcow2}
 run_dir=$(dirname -- "$log")
 mkdir -p "$run_dir"
 
 [[ -f $data_disk ]] || {
   echo "missing data disk: ${data_disk:-SERVER_DATA_DISK is unset}" >&2
   echo "build one with: sudo SERVER_DISK=1 tests/vm/make-disk.sh <image> <output>" >&2
+  exit 2
+}
+[[ -f $unlabelled_disk ]] || {
+  echo "missing unlabelled disk: $unlabelled_disk" >&2
+  echo "build one with: sudo SERVER_DISK=1 SERVER_DATA_LABEL=ultus-data-wrong" >&2
+  echo "  SERVER_DATA_FILE=data-unlabelled.qcow2 tests/vm/make-disk.sh <image> <output>" >&2
   exit 2
 }
 [[ ${QEMU_NO_REBOOT:-1} == 0 ]] || {
@@ -104,6 +114,15 @@ prime_sudo() {
   wait_for_new 'ULTUS_SUDO:ok' 60 || { echo "sudo did not accept the test password" >&2; exit 1; }
 }
 
+# Every stage after the first boots the same source disk, so the running guest
+# has to stop first: two QEMUs writing one qcow2 would corrupt it.
+stop_vm() {
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  kill "$reader_pid" 2>/dev/null || true
+  exec 7>&-
+}
+
 # Stage one: the data disk is present, so the mount, the rootless write, the
 # isolation canaries, the backup and the restart-after-reboot all have a subject.
 qemu_extra_drives+=(-drive "file=$data_disk,if=virtio,format=raw")
@@ -124,6 +143,12 @@ probe 'ULTUS_CWD:ok' 60 'cd /var/tmp && printf "ULTUS_CWD:%s\n" ok'
 # The workspace marker comes from a probe on the guest, not from a process
 # check: a unit that is active while it serves nothing still fails here.
 probe 'ULTUS_MOUNT:(ok|missing)' 60 'mountpoint -q /var/srv && printf "ULTUS_MOUNT:%s\n" ok || printf "ULTUS_MOUNT:%s\n" missing'
+# /srv is the path the install page and every app use; it reaches the data disk
+# through the base image's symlink. The guest decides and prints the four values
+# beside the verdict, so a failure names which half diverged, and nothing here
+# parses the console log. stat needs -L: without it, /srv's device is the
+# symlink's own, which is the OS disk and would fail every time.
+probe 'ULTUS_SRV:(ok|diverged)' 60 'link=$(readlink -f /srv); srv_dev=$(stat -L -c %d /srv); var_dev=$(stat -c %d /var/srv); root_dev=$(stat -c %d /); if [[ $link == /var/srv && $srv_dev == "$var_dev" && $srv_dev != "$root_dev" ]]; then state=ok; else state=diverged; fi; printf "ULTUS_SRV:%s link=%s srv_dev=%s var_dev=%s root_dev=%s\n" "$state" "$link" "$srv_dev" "$var_dev" "$root_dev"'
 probe 'ULTUS_LINGER:(yes|no)' 60 'printf "ULTUS_LINGER:%s\n" "$(loginctl show-user agents -p Linger --value)"'
 # The image entrypoint is the workload itself, so a probe that wants a shell has
 # to name one. The owner check runs as root because the mounted directory is
@@ -136,7 +161,7 @@ probe 'ULTUS_CANARY_END:ok' "$timeout_s" "for p in /home/$test_user /root/.ssh /
 probe 'ULTUS_LISTEN:(wide|loopback)' 60 'ss -ltnH | awk "{print \$4}" | grep -vE "^(\[?::1\]?|127\.[0-9.]+)(%[^:]+)?:" | grep -q . && printf "ULTUS_LISTEN:%s\n" wide || printf "ULTUS_LISTEN:%s\n" loopback'
 probe 'ULTUS_PROBE_END:ok' 60 'printf "ULTUS_PROBE_END:%s\n" ok'
 
-for marker in 'ULTUS_CWD:ok' 'ULTUS_MOUNT:ok' 'ULTUS_LINGER:yes' 'ULTUS_OWNER:1000' 'ULTUS_CANARY_END:ok' 'ULTUS_LISTEN:loopback'; do
+for marker in 'ULTUS_CWD:ok' 'ULTUS_MOUNT:ok' 'ULTUS_SRV:ok' 'ULTUS_LINGER:yes' 'ULTUS_OWNER:1000' 'ULTUS_CANARY_END:ok' 'ULTUS_LISTEN:loopback'; do
   if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true
@@ -190,6 +215,30 @@ if ! normalize_log <"$log" | grep -cF 'ULTUS_ACTIVE:ok' >/dev/null; then
   exit 1
 fi
 
+# `serve --service` reads its basic-auth password from service.json and ignores
+# OPENCODE_PASSWORD, so the unit seeds that file from the secret before the
+# container starts. Compare it with the fixture here: a server that generated its
+# own password would refuse the operator and Hermes.
+probe 'ULTUS_SERVICE_PASSWORD:(ok|mismatch|missing)' 60 'config=/var/srv/opencode/config/service.json; if ! sudo test -r "$config"; then printf "ULTUS_SERVICE_PASSWORD:%s\n" missing; elif [[ $(sudo jq -r .password "$config") == server-secret ]]; then printf "ULTUS_SERVICE_PASSWORD:%s\n" ok; else printf "ULTUS_SERVICE_PASSWORD:%s\n" mismatch; fi'
+if ! normalize_log <"$log" | grep -cF 'ULTUS_SERVICE_PASSWORD:ok' >/dev/null; then
+  echo "boot failed: the OpenCode server password is not the operator's secret" >&2
+  dump_workloads
+  exit 1
+fi
+
+# The update window's failure contract is a resumed session: OpenCode persists
+# its state under /var/srv, so a client that reconnects after a reboot finds the
+# session it left. Create one through the published loopback port, keep its id on
+# the data disk, and read it back after the reboot. The password comes from the
+# seeded service.json and the basic-auth user is `opencode`. The guest writes the
+# id, so this harness never parses the console log for it.
+probe 'ULTUS_SESSION:(ok|missing)' 180 'pw=$(sudo jq -r .password /var/srv/opencode/config/service.json); for i in $(seq 1 60); do id=$(curl -fsS -u "opencode:$pw" -H "content-type: application/json" -d "{\"title\":\"pre-window\"}" http://127.0.0.1:4096/api/session 2>/dev/null | jq -r ".data.id // empty"); [[ $id == ses_* ]] && break; sleep 2; done; if [[ $id != ses_* ]]; then printf "ULTUS_SESSION:%s\n" missing; else printf "%s\n" "$id" | sudo tee /var/srv/ultus/session-id >/dev/null && printf "ULTUS_SESSION:%s\n" ok; fi'
+if ! normalize_log <"$log" | grep -cF 'ULTUS_SESSION:ok' >/dev/null; then
+  echo "boot failed: the OpenCode server created no session" >&2
+  dump_workloads
+  exit 1
+fi
+
 # The reboot stage proves the data disk survives, that the workloads come back
 # from their enabled units, and that nothing depended on the test's session.
 mark_log
@@ -218,7 +267,12 @@ fi
 prime_sudo
 probe 'ULTUS_REBOOT_MARKER:(ok|missing)' 60 'sudo test -f /var/srv/ultus/reboot-marker && printf "ULTUS_REBOOT_MARKER:%s\n" ok || printf "ULTUS_REBOOT_MARKER:%s\n" missing'
 probe 'ULTUS_REBOOT_END:ok' "$timeout_s" 'for i in $(seq 1 120); do if systemctl is-active --quiet opencode.service && systemctl is-active --quiet hermes.service; then printf "ULTUS_REBOOT_ACTIVE:%s\n" ok; break; fi; sleep 5; done; printf "ULTUS_REBOOT_END:%s\n" ok'
-for marker in 'ULTUS_REBOOT_MARKER:ok' 'ULTUS_REBOOT_ACTIVE:ok'; do
+# The unit is active before the server inside it answers, so retry rather than
+# read one early failure as a lost session. The id and the password come off the
+# data disk, so nothing here parses the console log, and the body must carry the
+# title the first run set: a 200 for a different session would not do.
+probe 'ULTUS_SESSION_READ:(ok|missing)' 180 'id=$(sudo cat /var/srv/ultus/session-id); if [[ $id != ses_* ]]; then printf "ULTUS_SESSION_READ:%s\n" missing; else pw=$(sudo jq -r .password /var/srv/opencode/config/service.json); for i in $(seq 1 60); do code=$(curl -s -o /tmp/session.json -w "%{http_code}" -u "opencode:$pw" "http://127.0.0.1:4096/api/session/$id"); [[ $code == 200 ]] && break; sleep 2; done; [[ $code == 200 ]] && grep -q pre-window /tmp/session.json && printf "ULTUS_SESSION_READ:%s\n" ok || printf "ULTUS_SESSION_READ:%s\n" missing; fi'
+for marker in 'ULTUS_REBOOT_MARKER:ok' 'ULTUS_REBOOT_ACTIVE:ok' 'ULTUS_SESSION_READ:ok'; do
   if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed after the reboot: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true
@@ -231,12 +285,10 @@ done
 # directory on the OS disk, and the whole point of the mount gate is that no
 # workload starts and nothing is written there.
 first_log=$log
-kill "$pid" 2>/dev/null || true
-wait "$pid" 2>/dev/null || true
-kill "$reader_pid" 2>/dev/null || true
-exec 7>&-
+stop_vm
 
-log=$run_dir/server-boot-nodisk.log
+nodisk_log=$run_dir/server-boot-nodisk.log
+log=$nodisk_log
 qemu_extra_drives=()
 QEMU_NO_REBOOT=1
 vm_start
@@ -256,13 +308,17 @@ probe 'ULTUS_NODISK_MOUNT:(absent|present)' 60 'mountpoint -q /var/srv && printf
 # refused the start because the mount was missing. That is the gate, not the
 # absence of a crash.
 probe 'ULTUS_NODISK_CONDITION:(yes|no)' 60 'test "$(systemctl show opencode.service -p ConditionResult --value)" = no && test "$(systemctl show hermes.service -p ConditionResult --value)" = no && printf "ULTUS_NODISK_CONDITION:%s\n" no || printf "ULTUS_NODISK_CONDITION:%s\n" yes'
+# The mount unit itself carries the refusal: with no device under the label it
+# names, var-srv.mount fails. `nofail` keeps that from stopping boot, so the
+# state is readable here.
+probe 'ULTUS_NODISK_UNIT:(failed|active)' 60 'test "$(systemctl is-failed var-srv.mount)" = failed && printf "ULTUS_NODISK_UNIT:%s\n" failed || printf "ULTUS_NODISK_UNIT:%s\n" active'
 probe 'ULTUS_NODISK_OPENCODE:(active|inactive)' 60 'cd /var/tmp || exit 1; systemctl is-active --quiet opencode.service && printf "ULTUS_NODISK_OPENCODE:%s\n" active || printf "ULTUS_NODISK_OPENCODE:%s\n" inactive'
 probe 'ULTUS_NODISK_HERMES:(active|inactive)' 60 'systemctl is-active --quiet hermes.service && printf "ULTUS_NODISK_HERMES:%s\n" active || printf "ULTUS_NODISK_HERMES:%s\n" inactive'
 probe 'ULTUS_NODISK_CONTAINER:(present|absent)' "$timeout_s" 'containers=$(sudo -u agents env HOME=/var/lib/agents XDG_RUNTIME_DIR=/run/user/1000 podman ps -a --format "{{.Names}}" 2>/dev/null || true); case "$containers" in *opencode*|*hermes*) printf "ULTUS_NODISK_CONTAINER:%s\n" present ;; *) printf "ULTUS_NODISK_CONTAINER:%s\n" absent ;; esac'
 probe 'ULTUS_NODISK_TREE:(present|absent)' 60 'test -e /var/srv/ultus && printf "ULTUS_NODISK_TREE:%s\n" present || printf "ULTUS_NODISK_TREE:%s\n" absent'
 probe 'ULTUS_NODISK_END:ok' 60 'printf "ULTUS_NODISK_END:%s\n" ok'
 
-for marker in 'ULTUS_NODISK_MOUNT:absent' 'ULTUS_NODISK_CONDITION:no' 'ULTUS_NODISK_OPENCODE:inactive' 'ULTUS_NODISK_HERMES:inactive' 'ULTUS_NODISK_CONTAINER:absent' 'ULTUS_NODISK_TREE:absent'; do
+for marker in 'ULTUS_NODISK_MOUNT:absent' 'ULTUS_NODISK_CONDITION:no' 'ULTUS_NODISK_UNIT:failed' 'ULTUS_NODISK_OPENCODE:inactive' 'ULTUS_NODISK_HERMES:inactive' 'ULTUS_NODISK_CONTAINER:absent' 'ULTUS_NODISK_TREE:absent'; do
   if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed without a data disk: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true
@@ -270,6 +326,50 @@ for marker in 'ULTUS_NODISK_MOUNT:absent' 'ULTUS_NODISK_CONDITION:no' 'ULTUS_NOD
   fi
 done
 
-echo "server boot ok: mount, rootless write, canaries, backup restore, reboot and the failed-mount path"
+# Stage three: a data drive that is attached but does not carry the ultus-data
+# label. That is what an operator gets by formatting a partition without the
+# label, and var-srv.mount names the label, so the drive must be ignored rather
+# than mounted. A build that mounted any ext4 disk would pass stage two and red
+# here.
+stop_vm
+
+log=$run_dir/server-boot-unlabelled.log
+qemu_extra_drives=(-drive "file=$unlabelled_disk,if=virtio,format=raw")
+QEMU_NO_REBOOT=1
+vm_start
+
+if ! serial_login; then
+  tail -20 "$log" >&2 || true
+  exit 1
+fi
+prime_sudo
+# The premise first, so this stage cannot pass by quietly having no second
+# drive: the guest sees the wrong label, udev publishes it under by-label, and
+# no ultus-data label exists.
+probe 'ULTUS_NOLABEL_PREMISE:(seen|absent)' 60 'lsblk -nlo PATH,LABEL | grep -qw ultus-data-wrong && printf "ULTUS_NOLABEL_PREMISE:%s\n" seen || printf "ULTUS_NOLABEL_PREMISE:%s\n" absent'
+probe 'ULTUS_NOLABEL_WRONG:(present|absent)' 60 'test -e /dev/disk/by-label/ultus-data-wrong && printf "ULTUS_NOLABEL_WRONG:%s\n" present || printf "ULTUS_NOLABEL_WRONG:%s\n" absent'
+# The refusal is attributable only if the unit wanted the label the guest lacks:
+# name both sides, then read the unit's own verdict.
+probe 'ULTUS_NOLABEL_WHAT:(matches|other)' 60 'test "$(systemctl show var-srv.mount -p What --value)" = /dev/disk/by-label/ultus-data && printf "ULTUS_NOLABEL_WHAT:%s\n" matches || printf "ULTUS_NOLABEL_WHAT:%s\n" other'
+probe 'ULTUS_NOLABEL_LABEL:(none|present)' 60 'test ! -e /dev/disk/by-label/ultus-data && printf "ULTUS_NOLABEL_LABEL:%s\n" none || printf "ULTUS_NOLABEL_LABEL:%s\n" present'
+probe 'ULTUS_NOLABEL_UNIT:(failed|active)' 60 'test "$(systemctl is-failed var-srv.mount)" = failed && printf "ULTUS_NOLABEL_UNIT:%s\n" failed || printf "ULTUS_NOLABEL_UNIT:%s\n" active'
+probe 'ULTUS_NOLABEL_MOUNT:(absent|present)' 60 'mountpoint -q /var/srv && printf "ULTUS_NOLABEL_MOUNT:%s\n" present || printf "ULTUS_NOLABEL_MOUNT:%s\n" absent'
+probe 'ULTUS_NOLABEL_CONDITION:(yes|no)' 60 'test "$(systemctl show opencode.service -p ConditionResult --value)" = no && test "$(systemctl show hermes.service -p ConditionResult --value)" = no && printf "ULTUS_NOLABEL_CONDITION:%s\n" no || printf "ULTUS_NOLABEL_CONDITION:%s\n" yes'
+probe 'ULTUS_NOLABEL_OPENCODE:(active|inactive)' 60 'cd /var/tmp || exit 1; systemctl is-active --quiet opencode.service && printf "ULTUS_NOLABEL_OPENCODE:%s\n" active || printf "ULTUS_NOLABEL_OPENCODE:%s\n" inactive'
+probe 'ULTUS_NOLABEL_HERMES:(active|inactive)' 60 'systemctl is-active --quiet hermes.service && printf "ULTUS_NOLABEL_HERMES:%s\n" active || printf "ULTUS_NOLABEL_HERMES:%s\n" inactive'
+probe 'ULTUS_NOLABEL_CONTAINER:(present|absent)' "$timeout_s" 'containers=$(sudo -u agents env HOME=/var/lib/agents XDG_RUNTIME_DIR=/run/user/1000 podman ps -a --format "{{.Names}}" 2>/dev/null || true); case "$containers" in *opencode*|*hermes*) printf "ULTUS_NOLABEL_CONTAINER:%s\n" present ;; *) printf "ULTUS_NOLABEL_CONTAINER:%s\n" absent ;; esac'
+probe 'ULTUS_NOLABEL_TREE:(present|absent)' 60 'test -e /var/srv/ultus && printf "ULTUS_NOLABEL_TREE:%s\n" present || printf "ULTUS_NOLABEL_TREE:%s\n" absent'
+probe 'ULTUS_NOLABEL_END:ok' 60 'printf "ULTUS_NOLABEL_END:%s\n" ok'
+
+for marker in 'ULTUS_NOLABEL_PREMISE:seen' 'ULTUS_NOLABEL_WRONG:present' 'ULTUS_NOLABEL_WHAT:matches' 'ULTUS_NOLABEL_LABEL:none' 'ULTUS_NOLABEL_UNIT:failed' 'ULTUS_NOLABEL_MOUNT:absent' 'ULTUS_NOLABEL_CONDITION:no' 'ULTUS_NOLABEL_OPENCODE:inactive' 'ULTUS_NOLABEL_HERMES:inactive' 'ULTUS_NOLABEL_CONTAINER:absent' 'ULTUS_NOLABEL_TREE:absent'; do
+  if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
+    echo "boot failed with an unlabelled data disk: ${marker} was not reported" >&2
+    grep -a 'ULTUS_' "$log" >&2 || true
+    exit 1
+  fi
+done
+
+echo "server boot ok: mount, /srv, rootless write, canaries, backup restore, session resume, reboot, the no-disk path and the unlabelled-disk path"
 echo "log: $first_log"
+echo "log: $nodisk_log"
 echo "log: $log"

@@ -1,0 +1,31 @@
+#!/bin/bash
+# Seed the service password from the operator's secret before the server starts.
+#
+# `serve --service` reads its basic-auth password from service.json and ignores
+# OPENCODE_PASSWORD. Without this file the server comes up with a random
+# password the operator never sees, so write the operator's value first. The
+# file sits on the data disk, so the password survives a reboot and a rollback.
+set -oue pipefail
+
+dir=/var/srv/opencode/config
+config=$dir/service.json
+[[ -n ${OPENCODE_PASSWORD:-} ]] || {
+  echo "opencode-service-config: OPENCODE_PASSWORD is unset or empty" >&2
+  exit 1
+}
+
+mkdir -p "$dir"
+tmp=$(mktemp "$dir/.service.json.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+# Merge rather than replace: the server also writes hostname, port and env into
+# this file. Invalid JSON makes jq fail, so the unit stops before the container
+# starts instead of serving on a password nobody knows.
+if [[ -s $config ]]; then
+  jq --arg password "$OPENCODE_PASSWORD" '.password = $password' "$config" >"$tmp"
+else
+  jq -n --arg password "$OPENCODE_PASSWORD" '{password: $password}' >"$tmp"
+fi
+chmod 0600 "$tmp"
+mv -f "$tmp" "$config"
+trap - EXIT
+echo "opencode-service-config: wrote $config"
