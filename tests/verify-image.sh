@@ -382,11 +382,11 @@ if ((server)); then
   echo "ok   the server answers no LLMNR or mDNS on the LAN"
 fi
 # The lock records every package whose origin repository is not a Fedora
-# repository. The comparison is a post-build drift gate: the build installs
-# from live repositories and the lock records what landed in the image, so a
-# Fedora updates bump must not red this gate. A +git build tracks an upstream
-# branch and cannot be pinned; the generator leaves it out and the VM boot
-# test covers a broken one.
+# repository. The comparison is a post-build gate on provenance: the build
+# installs from live repositories, so a Fedora updates bump must not red this
+# gate, and a third-party rebuild of a package already recorded warns rather
+# than blocks (#153). Unpinnable git snapshots stay out of the lock; the
+# generator names each one on stderr and the VM boot test covers a broken one.
 if (( no_lock == 1 )); then
   echo "ok   package lock comparison skipped (--no-package-lock)"
 else
@@ -404,7 +404,8 @@ else
   # A nonzero status here means the generator or the image is broken, not that the
   # lock drifted, so keep the two diagnoses apart. The comparison lives in
   # build/compare-lock.sh so tests/test-lock-drift.sh can exercise it with no
-  # image: its status 2 is the failed measurement, its status 1 is drift.
+  # image: its status 2 is the failed measurement, its status 1 is a package that
+  # appeared, disappeared or changed origin repository.
   if ! raw=$(CONTAINER_RUNTIME=$runtime "$repo_root/build/package-lock.sh" "$image"); then
     echo "FAIL the lock measurement failed; the generator or the image is broken" >&2
     exit 1
@@ -412,11 +413,17 @@ else
   compare_status=0
   compare_detail=$("$repo_root/build/compare-lock.sh" "$lock" <(printf '%s\n' "$raw") 2>&1) || compare_status=$?
   if ((compare_status == 1)); then
-    echo "FAIL the third-party package lock drifted; run 'just lock'" >&2
+    echo "FAIL the third-party lock set changed: a package appeared, disappeared, or changed origin repository. Run 'just lock' after confirming the change" >&2
     printf '%s\n' "$compare_detail" >&2
     exit 1
   elif ((compare_status != 0)); then
     echo "FAIL the lock measurement failed; the generator or the image is broken" >&2
     exit 1
+  elif [[ -n $compare_detail ]]; then
+    # A rebuild is a warning, and the operator should see it in the job log.
+    printf '%s\n' "$compare_detail"
+    echo "ok   the third-party lock set matches; the recorded builds are older than the image"
+  else
+    echo "ok   the third-party lock set and its recorded builds match the image"
   fi
 fi
