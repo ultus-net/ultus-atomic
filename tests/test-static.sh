@@ -154,6 +154,21 @@ else
   echo "ok   opencode.service seeds the service password from the secret"
 fi
 
+# A hosted runner has no /dev/kvm, and OpenCode's runtime aborts under QEMU TCG
+# (run 45780444809, trap invalid opcode), so the session assertions must state
+# their skip instead of failing the job. Pin the guard, both markers, and the
+# post-reboot selection, because a deleted guard would read as a green boot that
+# proved nothing (#164).
+if ! grep -qF 'if [[ $accel != kvm ]]; then' "$server_boot_test" ||
+   ! grep -qF 'ULTUS_SESSION:skipped-tcg' "$server_boot_test" ||
+   ! grep -qF 'ULTUS_SESSION_READ:skipped-tcg' "$server_boot_test" ||
+   ! grep -qF '"$session_read_marker"' "$server_boot_test"; then
+  echo "FAIL boot-smoke-server.sh does not skip the session assertions on TCG and name the skip" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   the server boot test skips the session API on TCG and says so"
+fi
+
 tailnet_unit=$repo_root/modules/server/usr/lib/systemd/system/ultus-tailnet.service
 tailnet_script=$repo_root/modules/server/usr/libexec/ultus/ultus-tailnet
 missing_surfaces=()

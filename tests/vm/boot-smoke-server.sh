@@ -226,17 +226,32 @@ if ! normalize_log <"$log" | grep -cF 'ULTUS_SERVICE_PASSWORD:ok' >/dev/null; th
   exit 1
 fi
 
+# QEMU's TCG backend cannot execute every instruction OpenCode's runtime emits:
+# run 45780444809's second boot aborted with SIGILL (trap invalid opcode), so the
+# API never answered and the read looked like a hang. Hardware executes it, so
+# the session assertions stay on KVM and print a marker on TCG that names what
+# was skipped. The hardware UAT in #149 closes the gap (#164).
+session_skip=0
+if [[ $accel != kvm ]]; then
+  session_skip=1
+fi
+
 # The update window's failure contract is a resumed session: OpenCode persists
 # its state under /var/srv, so a client that reconnects after a reboot finds the
 # session it left. Create one through the published loopback port, keep its id on
 # the data disk, and read it back after the reboot. The password comes from the
 # seeded service.json and the basic-auth user is `opencode`. The guest writes the
 # id, so this harness never parses the console log for it.
-probe 'ULTUS_SESSION:(ok|missing)' 180 'pw=$(sudo jq -r .password /var/srv/opencode/config/service.json); for i in $(seq 1 60); do id=$(curl -fsS -u "opencode:$pw" -H "content-type: application/json" -d "{\"title\":\"pre-window\"}" http://127.0.0.1:4096/api/session 2>/dev/null | jq -r ".data.id // empty"); [[ $id == ses_* ]] && break; sleep 2; done; if [[ $id != ses_* ]]; then printf "ULTUS_SESSION:%s\n" missing; else printf "%s\n" "$id" | sudo tee /var/srv/ultus/session-id >/dev/null && printf "ULTUS_SESSION:%s\n" ok; fi'
-if ! normalize_log <"$log" | grep -cF 'ULTUS_SESSION:ok' >/dev/null; then
-  echo "boot failed: the OpenCode server created no session" >&2
-  dump_workloads
-  exit 1
+if ((session_skip)); then
+  probe 'ULTUS_SESSION:skipped-tcg' 60 'printf "ULTUS_SESSION:%s\n" skipped-tcg'
+  echo "skipped: the session API assertion runs on KVM only; TCG SIGILLs opencode (#164)" >&2
+else
+  probe 'ULTUS_SESSION:(ok|missing)' 180 'pw=$(sudo jq -r .password /var/srv/opencode/config/service.json); for i in $(seq 1 60); do id=$(curl -fsS -u "opencode:$pw" -H "content-type: application/json" -d "{\"title\":\"pre-window\"}" http://127.0.0.1:4096/api/session 2>/dev/null | jq -r ".data.id // empty"); [[ $id == ses_* ]] && break; sleep 2; done; if [[ $id != ses_* ]]; then printf "ULTUS_SESSION:%s\n" missing; else printf "%s\n" "$id" | sudo tee /var/srv/ultus/session-id >/dev/null && printf "ULTUS_SESSION:%s\n" ok; fi'
+  if ! normalize_log <"$log" | grep -cF 'ULTUS_SESSION:ok' >/dev/null; then
+    echo "boot failed: the OpenCode server created no session" >&2
+    dump_workloads
+    exit 1
+  fi
 fi
 
 # The reboot stage proves the data disk survives, that the workloads come back
@@ -271,8 +286,14 @@ probe 'ULTUS_REBOOT_END:ok' "$timeout_s" 'for i in $(seq 1 120); do if systemctl
 # read one early failure as a lost session. The id and the password come off the
 # data disk, so nothing here parses the console log, and the body must carry the
 # title the first run set: a 200 for a different session would not do.
-probe 'ULTUS_SESSION_READ:(ok|missing)' 180 'id=$(sudo cat /var/srv/ultus/session-id); if [[ $id != ses_* ]]; then printf "ULTUS_SESSION_READ:%s\n" missing; else pw=$(sudo jq -r .password /var/srv/opencode/config/service.json); for i in $(seq 1 60); do code=$(curl -s -o /tmp/session.json -w "%{http_code}" -u "opencode:$pw" "http://127.0.0.1:4096/api/session/$id"); [[ $code == 200 ]] && break; sleep 2; done; [[ $code == 200 ]] && grep -q pre-window /tmp/session.json && printf "ULTUS_SESSION_READ:%s\n" ok || printf "ULTUS_SESSION_READ:%s\n" missing; fi'
-for marker in 'ULTUS_REBOOT_MARKER:ok' 'ULTUS_REBOOT_ACTIVE:ok' 'ULTUS_SESSION_READ:ok'; do
+if ((session_skip)); then
+  session_read_marker='ULTUS_SESSION_READ:skipped-tcg'
+  probe "$session_read_marker" 60 'printf "ULTUS_SESSION_READ:%s\n" skipped-tcg'
+else
+  session_read_marker='ULTUS_SESSION_READ:ok'
+  probe 'ULTUS_SESSION_READ:(ok|missing)' 180 'id=$(sudo cat /var/srv/ultus/session-id); if [[ $id != ses_* ]]; then printf "ULTUS_SESSION_READ:%s\n" missing; else pw=$(sudo jq -r .password /var/srv/opencode/config/service.json); for i in $(seq 1 60); do code=$(curl -s -o /tmp/session.json -w "%{http_code}" -u "opencode:$pw" "http://127.0.0.1:4096/api/session/$id"); [[ $code == 200 ]] && break; sleep 2; done; [[ $code == 200 ]] && grep -q pre-window /tmp/session.json && printf "ULTUS_SESSION_READ:%s\n" ok || printf "ULTUS_SESSION_READ:%s\n" missing; fi'
+fi
+for marker in 'ULTUS_REBOOT_MARKER:ok' 'ULTUS_REBOOT_ACTIVE:ok' "$session_read_marker"; do
   if ! normalize_log <"$log" | grep -cF "$marker" >/dev/null; then
     echo "boot failed after the reboot: ${marker} was not reported" >&2
     grep -a 'ULTUS_' "$log" >&2 || true
