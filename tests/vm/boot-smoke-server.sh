@@ -135,6 +135,17 @@ fi
 
 prime_sudo
 
+# The root ticket lasts 300s by default, and the first TCG image pull can outlast
+# it: in run 45805544687 the devbox pull finished at guest uptime 559s, so the
+# `sudo stat` that followed asked for a password and the probe waited out its
+# whole budget. Every later stage also starts a fresh privileged command after
+# work of unknown length, so refresh the ticket for as long as the test runs.
+probe 'ULTUS_SUDO_KEEP:ok' 60 'nohup bash -c "while sleep 60; do sudo -n -v && date +%s >> /tmp/sudo-keep.log; done" </dev/null >/dev/null 2>&1 & printf "ULTUS_SUDO_KEEP:%s\n" ok'
+# Prove the refresh rather than trust it: every successful check re-arms the
+# ticket, so two refreshes already show the loop is alive and privileged. A loop
+# that never ran leaves no log, and the marker says stale instead of passing.
+probe 'ULTUS_SUDO_KEEPED:ok' 130 'sleep 125; n=0; if [[ -f /tmp/sudo-keep.log ]]; then n=$(wc -l < /tmp/sudo-keep.log); fi; if ((n >= 2)); then printf "ULTUS_SUDO_KEEPED:%s\n" ok; else printf "ULTUS_SUDO_KEEPED:%s n=%s\n" stale "$n"; fi'
+
 # The probes run as `agents`, and sudo keeps the caller's directory. The login
 # lands in the test account's 0700 home, so `agents` cannot enter it and every
 # probe dies before podman starts. Move to a directory both users can traverse.
@@ -280,6 +291,9 @@ if ! wait_for_new "${test_user}@" 180; then
 fi
 
 prime_sudo
+# Same keeper as the first boot: the workload restart can take longer than the
+# ticket, and the probes after it still need root.
+probe 'ULTUS_SUDO_KEEP:ok' 60 'nohup bash -c "while sleep 60; do sudo -n -v; done" </dev/null >/dev/null 2>&1 & printf "ULTUS_SUDO_KEEP:%s\n" ok'
 probe 'ULTUS_REBOOT_MARKER:(ok|missing)' 60 'sudo test -f /var/srv/ultus/reboot-marker && printf "ULTUS_REBOOT_MARKER:%s\n" ok || printf "ULTUS_REBOOT_MARKER:%s\n" missing'
 probe 'ULTUS_REBOOT_END:ok' "$timeout_s" 'for i in $(seq 1 120); do if systemctl is-active --quiet opencode.service && systemctl is-active --quiet hermes.service; then printf "ULTUS_REBOOT_ACTIVE:%s\n" ok; break; fi; sleep 5; done; printf "ULTUS_REBOOT_END:%s\n" ok'
 # The unit is active before the server inside it answers, so retry rather than
