@@ -432,7 +432,7 @@ else
   if ((compare_status == 1)); then
     # The lock records provenance; it does not pin what a build installs. Blocking
     # here held every open pull request when a third-party package moved, so the
-    # difference is reported and the publish path checks exact equality (#153).
+    # difference is reported; exact equality belongs on the publish path (#153).
     printf '%s\n' "$compare_detail"
     echo "WARN the third-party lock set changed; #153 tracks the exact equality check on the publish path"
   elif ((compare_status != 0)); then
