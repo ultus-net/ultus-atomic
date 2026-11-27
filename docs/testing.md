@@ -9,7 +9,7 @@ sudo tests/vm/make-disk.sh
 tests/vm/boot-smoke.sh
 ```
 
-`make-disk.sh` runs bootc-image-builder as root. The builder image follows `:latest` because it shapes a disposable disk rather than the artifact; set `BIB_IMAGE` to a digest to reproduce an old disk. It adds one test account (`dux` / `dux-test` by default, override with `TEST_USER` and `TEST_PASSWORD`, skip with `NO_TEST_USER=1`) because the image ships no interactive user. Credentials reject quotes, backslashes, and newlines, which would break the generated TOML. It also sets `systemd.default_device_timeout_sec=180` on the test disk only: a TCG boot can run at half speed and miss the shipped 45s device timeout before `/boot` appears. The builder intermittently fails its first step with `cpio: premature end of archive` on an initramfs that is byte-identical on disk (#173), so the script retries that signature once and fails every other error immediately.
+`make-disk.sh` runs bootc-image-builder as root. The builder image is pinned by digest so a moving `:latest` cannot change the disk; override the pin with `BIB_IMAGE`. It adds one test account (`dux` / `dux-test` by default, override with `TEST_USER` and `TEST_PASSWORD`, skip with `NO_TEST_USER=1`) because the image ships no interactive user. Credentials reject quotes, backslashes, and newlines, which would break the generated TOML. It also sets `systemd.default_device_timeout_sec=180` on the test disk only: a TCG boot can run at half speed and miss the shipped 45s device timeout before `/boot` appears.
 
 ### A promoted digest
 

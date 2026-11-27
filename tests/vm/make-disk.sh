@@ -107,7 +107,7 @@ if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
   security_args+=(--security-opt label=type:unconfined_t)
 fi
 
-run_bib() {
+if [[ $data_only == 0 ]]; then
   podman run --rm --privileged \
     "${security_args[@]}" \
     "${config_args[@]}" \
@@ -116,25 +116,6 @@ run_bib() {
     "$bib_image" \
     build "$image" --type qcow2 --rootfs btrfs --use-librepo=True --output /output \
     --chown "${SUDO_UID:-0}:${SUDO_GID:-0}"
-}
-
-if [[ $data_only == 0 ]]; then
-  # The builder intermittently fails its first step, reading an initramfs that
-  # is byte-identical in the image and reads clean in the same builder (#173).
-  # Retry only that signature: the content is proven, and a real error repeats.
-  bib_output=$(mktemp)
-  trap 'rm -rf "$config_dir" "$bib_output"' EXIT
-  attempt=1
-  while :; do
-    if run_bib 2>&1 | tee "$bib_output"; then
-      break
-    fi
-    if ((attempt >= 2)) || ! grep -qF 'premature end of archive' "$bib_output"; then
-      exit 1
-    fi
-    echo "bootc-image-builder failed reading the initramfs (issue #173); retrying once" >&2
-    attempt=$((attempt + 1))
-  done
 fi
 
 # The server units are gated on /var/srv being a mountpoint, so the boot test
