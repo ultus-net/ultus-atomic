@@ -399,10 +399,10 @@ if ((server)); then
   echo "ok   the server answers no LLMNR or mDNS on the LAN"
 fi
 # The lock records every package whose origin repository is not a Fedora
-# repository. The comparison is a post-build gate on provenance: the build
-# installs from live repositories, so a Fedora updates bump must not red this
-# gate, and a third-party rebuild of a package already recorded warns rather
-# than blocks (#153). Unpinnable git snapshots stay out of the lock; the
+# repository. The comparison reports provenance rather than gating it: the build
+# installs from live repositories, so a Fedora updates bump or a third-party
+# move must not hold a pull request, and exact NEVRA equality belongs on the
+# publish path (#153, #171). Unpinnable git snapshots stay out of the lock; the
 # generator names each one on stderr and the VM boot test covers a broken one.
 if (( no_lock == 1 )); then
   echo "ok   package lock comparison skipped (--no-package-lock)"
@@ -430,9 +430,11 @@ else
   compare_status=0
   compare_detail=$("$repo_root/build/compare-lock.sh" "$lock" <(printf '%s\n' "$raw") 2>&1) || compare_status=$?
   if ((compare_status == 1)); then
-    echo "FAIL the third-party lock set changed: a package appeared, disappeared, or changed origin repository. Run 'just lock' after confirming the change" >&2
-    printf '%s\n' "$compare_detail" >&2
-    exit 1
+    # The lock records provenance; it does not pin what a build installs. Blocking
+    # here held every open pull request when a third-party package moved, so the
+    # difference is reported; exact equality belongs on the publish path (#153).
+    printf '%s\n' "$compare_detail"
+    echo "WARN the third-party lock set changed; #153 tracks the exact equality check on the publish path"
   elif ((compare_status != 0)); then
     echo "FAIL the lock measurement failed; the generator or the image is broken" >&2
     exit 1
