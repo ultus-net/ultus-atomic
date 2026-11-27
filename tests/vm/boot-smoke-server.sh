@@ -135,6 +135,17 @@ fi
 
 prime_sudo
 
+# The root ticket lasts 300s by default, and the first TCG image pull can outlast
+# it: in run 45805544687 the devbox pull finished at guest uptime 559s, so the
+# `sudo stat` that followed asked for a password and the probe waited out its
+# whole budget. Every later stage also starts a fresh privileged command after
+# work of unknown length, so refresh the ticket for as long as the test runs.
+probe 'ULTUS_SUDO_KEEP:ok' 60 'nohup bash -c "while :; do if sudo -n -v; then date +%s >> /tmp/sudo-keep.log; else date +%s >> /tmp/sudo-keep.fail; fi; sleep 60; done" </dev/null >/dev/null 2>&1 & printf "ULTUS_SUDO_KEEP:%s\n" ok'
+# Prove the refresh rather than trust it: every successful check re-arms the
+# ticket, so two refreshes already show the loop is alive and privileged. A loop
+# that never ran leaves no log, and the marker says stale instead of passing.
+probe 'ULTUS_SUDO_KEEPED:ok' 130 'sleep 125; n=0; if [[ -f /tmp/sudo-keep.log ]]; then n=$(wc -l < /tmp/sudo-keep.log); fi; printf "%s\n" "$n" > /tmp/sudo-keep.start; if ((n >= 2)); then printf "ULTUS_SUDO_KEEPED:%s\n" ok; else printf "ULTUS_SUDO_KEEPED:%s n=%s\n" stale "$n"; fi'
+
 # The probes run as `agents`, and sudo keeps the caller's directory. The login
 # lands in the test account's 0700 home, so `agents` cannot enter it and every
 # probe dies before podman starts. Move to a directory both users can traverse.
@@ -254,6 +265,14 @@ else
   fi
 fi
 
+# The keeper's claim is that no later privileged step meets an expired ticket.
+# Check that at the end of the boot, not only at the start: the count grew since
+# the first check and no refresh failed, so the loop was still working when the
+# last privileged probe ran. Wait for the next tick rather than sample once: a
+# boot that ends between two ticks would otherwise red a healthy keeper. A keeper
+# that died without failing still cannot pass, because the count stops growing.
+probe 'ULTUS_SUDO_TICKET:ok' 200 'start=$(cat /tmp/sudo-keep.start); now=$start; for i in $(seq 1 130); do if [[ -f /tmp/sudo-keep.log ]]; then now=$(wc -l < /tmp/sudo-keep.log); fi; if ((now > start)); then break; fi; sleep 1; done; fails=0; if [[ -f /tmp/sudo-keep.fail ]]; then fails=$(wc -l < /tmp/sudo-keep.fail); fi; if ((fails == 0 && now > start)); then printf "ULTUS_SUDO_TICKET:%s refreshes=%s\n" ok "$now"; else printf "ULTUS_SUDO_TICKET:%s start=%s now=%s fails=%s\n" stale "$start" "$now" "$fails"; fi'
+
 # The reboot stage proves the data disk survives, that the workloads come back
 # from their enabled units, and that nothing depended on the test's session.
 mark_log
@@ -280,6 +299,9 @@ if ! wait_for_new "${test_user}@" 180; then
 fi
 
 prime_sudo
+# Same keeper as the first boot: the workload restart can take longer than the
+# ticket, and the probes after it still need root.
+probe 'ULTUS_SUDO_KEEP:ok' 60 'nohup bash -c "while :; do if sudo -n -v; then date +%s >> /tmp/sudo-keep2.log; else date +%s >> /tmp/sudo-keep2.fail; fi; sleep 60; done" </dev/null >/dev/null 2>&1 & printf "ULTUS_SUDO_KEEP:%s\n" ok'
 probe 'ULTUS_REBOOT_MARKER:(ok|missing)' 60 'sudo test -f /var/srv/ultus/reboot-marker && printf "ULTUS_REBOOT_MARKER:%s\n" ok || printf "ULTUS_REBOOT_MARKER:%s\n" missing'
 probe 'ULTUS_REBOOT_END:ok' "$timeout_s" 'for i in $(seq 1 120); do if systemctl is-active --quiet opencode.service && systemctl is-active --quiet hermes.service; then printf "ULTUS_REBOOT_ACTIVE:%s\n" ok; break; fi; sleep 5; done; printf "ULTUS_REBOOT_END:%s\n" ok'
 # The unit is active before the server inside it answers, so retry rather than
@@ -301,6 +323,12 @@ for marker in 'ULTUS_REBOOT_MARKER:ok' 'ULTUS_REBOOT_ACTIVE:ok' "$session_read_m
     exit 1
   fi
 done
+
+# This boot gets its own keeper and its own logs, so the same claim is checked
+# here: at least two refreshes and not one failure. The replayed stages can
+# finish inside one interval, so wait for the second tick instead of sampling
+# immediately, which run 45936899256 did and read an empty log.
+probe 'ULTUS_SUDO_TICKET:ok' 200 'now=0; for i in $(seq 1 130); do if [[ -f /tmp/sudo-keep2.log ]]; then now=$(wc -l < /tmp/sudo-keep2.log); fi; if ((now >= 2)); then break; fi; sleep 1; done; fails=0; if [[ -f /tmp/sudo-keep2.fail ]]; then fails=$(wc -l < /tmp/sudo-keep2.fail); fi; if ((fails == 0 && now >= 2)); then printf "ULTUS_SUDO_TICKET:%s refreshes=%s\n" ok "$now"; else printf "ULTUS_SUDO_TICKET:%s now=%s fails=%s\n" stale "$now" "$fails"; fi'
 
 # Stage two: the same disk with no data drive. /var/srv is then a plain
 # directory on the OS disk, and the whole point of the mount gate is that no
