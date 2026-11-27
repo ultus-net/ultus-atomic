@@ -191,8 +191,8 @@ jobs:
           # pins the v1 behaviour deliberately.
           swap-storage: true
 
-      - name: Install podman
-        run: build/install-packages.sh podman
+      - name: Install podman and qemu
+        run: build/install-packages.sh podman qemu-system-x86 qemu-utils ovmf
 
       - name: Build image
         run: podman build --layers -t localhost/ultus-atomic:ci .
@@ -234,6 +234,59 @@ jobs:
           path: ultus-atomic.spdx.json
           retention-days: 14
 
+      - name: Build disk
+        id: disk
+        # bootc-image-builder intermittently fails its manifest step with
+        # 'cpio: premature end of archive' on an initramfs that is byte-identical
+        # to the artifact and reads clean in the same builder (#173). tests/vm/
+        # build-disk.sh turns that one signature into exit 3, so it becomes a
+        # warning and skips the boot smoke; every other builder error keeps its
+        # status and still fails this step. The disk is disposable and nothing
+        # publishes it.
+        run: |
+          sudo podman load -i .cache/image.tar
+          set +e
+          sudo tests/vm/build-disk.sh localhost/ultus-atomic:ci "$GITHUB_WORKSPACE/output"
+          status=$?
+          set -e
+          if ((status == 0)); then
+            echo "built=yes" >> "$GITHUB_OUTPUT"
+          elif ((status == 3)); then
+            echo "::warning title=Disk build blocked by #173::the builder failed reading an initramfs that is byte-identical to the artifact; the boot smoke test did not run"
+            echo "built=no" >> "$GITHUB_OUTPUT"
+          else
+            exit "$status"
+          fi
+
+      - name: Boot smoke test
+        if: steps.disk.outputs.built == 'yes'
+        # Hosted runners have no /dev/kvm and no host GPU, so this is TCG and
+        # headless. It asserts the greeter session and the first-login units,
+        # not rendered pixels. The graphical dogfood stays a local step.
+        env:
+          # A hosted runner is TCG with no /dev/kvm, measured at roughly 4.6x
+          # wall-clock slowdown: run 43068532421 needed 21 minutes to reach the
+          # login prompt. 1800s leaves room for a slower runner, and the image
+          # job's timeout-minutes: 180 still bounds the whole build.
+          BOOT_TIMEOUT: '1800'
+          BOOT_GRACE: '300'
+          QEMU_ACCEL: tcg
+        run: |
+          tests/vm/boot-smoke.sh \
+            "$GITHUB_WORKSPACE/output/qcow2/disk.qcow2" \
+            "$GITHUB_WORKSPACE/.vm/boot.log"
+
+      - name: Upload boot evidence
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: boot-evidence
+          path: |
+            .vm/boot.log
+            .vm/qemu.err
+          retention-days: 14
+          if-no-files-found: ignore
+
       - name: Vulnerability scan
         # Blocking: .trivyignore holds the triaged duxlabs Go-binary findings
         # and every entry expires, so a stale ignore reds the scan (#3).
@@ -263,73 +316,6 @@ jobs:
           path: .cache/image.tar
           retention-days: 3
           compression-level: 0
-
-  # Advisory while #173 is open, so this job is not a required check: the
-  # builder intermittently fails its manifest step with 'cpio: premature end of
-  # archive' on an initramfs that is byte-identical to the artifact. The disk is
-  # disposable and nothing publishes it, so the artifact gate stays `image` and
-  # this job carries the boot proof. A working builder still runs it end to end,
-  # and #173 owns making it required again.
-  image-disk:
-    runs-on: ubuntu-24.04
-    needs: static
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Free runner disk space
-        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
-        with:
-          preinstalled-runtimes: false
-          android: true
-          dotnet: true
-          haskell: true
-          # v2 leaves swap in place because removing it can kill a job under
-          # memory pressure. The disk and qcow2 builds need the space, so this
-          # pins the v1 behaviour deliberately.
-          swap-storage: true
-
-      - name: Install podman and qemu
-        run: build/install-packages.sh podman qemu-system-x86 qemu-utils ovmf
-
-      - name: Build image
-        run: podman build --layers -t localhost/ultus-atomic:disk .
-
-      - name: Build disk
-        run: |
-          podman save localhost/ultus-atomic:disk -o "$RUNNER_TEMP/image.tar"
-          sudo podman load -i "$RUNNER_TEMP/image.tar"
-          sudo tests/vm/make-disk.sh localhost/ultus-atomic:disk "$GITHUB_WORKSPACE/output"
-
-      - name: Boot smoke test
-        # Hosted runners have no /dev/kvm and no host GPU, so this is TCG and
-        # headless. It asserts the greeter session and the first-login units,
-        # not rendered pixels. The graphical dogfood stays a local step.
-        env:
-          # A hosted runner is TCG with no /dev/kvm, measured at roughly 4.6x
-          # wall-clock slowdown: run 43068532421 needed 21 minutes to reach the
-          # login prompt. 1800s leaves room for a slower runner, and the job's
-          # timeout-minutes: 180 still bounds the whole build.
-          BOOT_TIMEOUT: '1800'
-          BOOT_GRACE: '300'
-          QEMU_ACCEL: tcg
-        run: |
-          tests/vm/boot-smoke.sh \
-            "$GITHUB_WORKSPACE/output/qcow2/disk.qcow2" \
-            "$GITHUB_WORKSPACE/.vm/boot.log"
-
-      - name: Upload boot evidence
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: boot-evidence
-          path: |
-            .vm/boot.log
-            .vm/qemu.err
-          retention-days: 14
-          if-no-files-found: ignore
 
   image-nvidia:
     needs: [static, changes]
