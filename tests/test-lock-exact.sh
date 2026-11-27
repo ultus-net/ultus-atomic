@@ -40,6 +40,8 @@ if ((status != 1)); then
   echo "FAIL a rebuilt NEVRA exited ${status}, expected 1" >&2
   failures=$((failures + 1))
 elif ! grep -qF -- '-mesa-vulkan-drivers-1:26.2.6-1.fc45.i686' "$work/err" || ! grep -qF -- '+mesa-vulkan-drivers-1:26.2.6-2.fc45.i686' "$work/err"; then
+  echo "--- comparator stderr ---" >&2
+  cat "$work/err" >&2
   echo "FAIL rebuilt NEVRA did not print the diff lines" >&2
   failures=$((failures + 1))
 else
@@ -47,24 +49,37 @@ else
 fi
 
 # Missing package -> exit 1
+# The measurement omits the recorded steam line entirely. Expect a single
+# '-' line naming the removed package and no '+steam-0:' line.
 missing=$work/missing.lock
 cat >"$missing" <<'LOCK'
 mesa-vulkan-drivers-1:26.2.6-1.fc45.i686	rpmfusion-free
-steam-0:1.0.0.87-4.fc45.x86_64	rpmfusion-nonfree
+mesa-vulkan-drivers-1:26.2.6-1.fc45.x86_64	rpmfusion-free
 LOCK
 status=0
 bash "$compare_sh" --strict "$recorded" "$missing" >"$work/out" 2>"$work/err" || status=$?
 if ((status != 1)); then
+  echo "--- comparator stderr ---" >&2
+  cat "$work/err" >&2
   echo "FAIL a missing package exited ${status}, expected 1" >&2
   failures=$((failures + 1))
-elif ! grep -qF -- '-mesa-vulkan-drivers-1:26.2.6-1.fc45.x86_64' "$work/err" || ! grep -qF -- '+mesa-vulkan-drivers-1:26.2.6-1.fc45.x86_64' "$work/err"; then
-  echo "FAIL missing package did not print both - and + lines" >&2
+elif ! grep -qF -- '-steam-0:1.0.0.87-4.fc45.x86_64' "$work/err"; then
+  echo "--- comparator stderr ---" >&2
+  cat "$work/err" >&2
+  echo "FAIL missing package did not print the removed -steam line" >&2
+  failures=$((failures + 1))
+elif grep -qF -- '+steam-0:' "$work/err"; then
+  echo "--- comparator stderr ---" >&2
+  cat "$work/err" >&2
+  echo "FAIL missing package printed an unexpected +steam line" >&2
   failures=$((failures + 1))
 else
   echo "ok   a missing package causes strict comparator to fail and names it"
 fi
 
 # Extra package -> exit 1
+# The measurement adds dms-cli while leaving all recorded lines present. Expect
+# a single '+dms-cli' line and no '-dms-cli' line.
 extra=$work/extra.lock
 cat >"$extra" <<'LOCK'
 mesa-vulkan-drivers-1:26.2.6-1.fc45.i686	rpmfusion-free
@@ -75,10 +90,19 @@ LOCK
 status=0
 bash "$compare_sh" --strict "$recorded" "$extra" >"$work/out" 2>"$work/err" || status=$?
 if ((status != 1)); then
+  echo "--- comparator stderr ---" >&2
+  cat "$work/err" >&2
   echo "FAIL an extra package exited ${status}, expected 1" >&2
   failures=$((failures + 1))
-elif ! grep -qF -- '+dms-cli' "$work/err" || ! grep -qF -- '-dms-cli' "$work/err"; then
-  echo "FAIL an extra package did not print both - and + lines" >&2
+elif ! grep -qF -- '+dms-cli' "$work/err"; then
+  echo "--- comparator stderr ---" >&2
+  cat "$work/err" >&2
+  echo "FAIL an extra package did not print the added +dms-cli line" >&2
+  failures=$((failures + 1))
+elif grep -qF -- '-dms-cli' "$work/err"; then
+  echo "--- comparator stderr ---" >&2
+  cat "$work/err" >&2
+  echo "FAIL an extra package printed an unexpected -dms-cli line" >&2
   failures=$((failures + 1))
 else
   echo "ok   an extra package causes strict comparator to fail and names it"
