@@ -226,13 +226,6 @@ jobs:
           # The same run's SBOM was 64181348 bytes and is 6508304 after this.
           jq -c -f build/sbom-packages-only.jq \
             "$RUNNER_TEMP/syft-full.spdx.json" > ultus-atomic.spdx.json
-          # The disk build runs later on this same filesystem. Run 45939827680
-          # failed there with 'cpio: premature end of archive', and the tree
-          # extracted here is a second copy of the rootfs that only the scan
-          # read. Remove it before the disk build; df in that step measures the
-          # space this frees. The image keeps directories mode 0555 for root
-          # (/etc/bluetooth), so the unprivileged runner cannot unlink inside.
-          sudo rm -rf "$RUNNER_TEMP/rootfs"
 
       - name: Upload SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -241,10 +234,47 @@ jobs:
           path: ultus-atomic.spdx.json
           retention-days: 14
 
-      - name: Build disk
+      - name: Load the image and record the initramfs it carries
         run: |
           df -h /
           sudo podman load -i .cache/image.tar
+          # Run 45945695114 failed in Build disk with 'cpio: premature end of
+          # archive' and 106G free (#173). Both copies below are the same path,
+          # taken from the image the build wrote and from the image the load
+          # wrote; the graph roots printed first show they are separate stores.
+          # Their sha256, and the builder's read of the loaded copy, are the
+          # numbers the next decision needs. Known good:
+          # 5b884b9eebf0e4f0ecb50a21031caad921615b885742ffb967065ad3d6ce95a0
+          podman info --format 'built store: {{.Store.GraphRoot}}'
+          sudo podman info --format 'loaded store: {{.Store.GraphRoot}}'
+          kver=$(sudo podman run --rm --entrypoint /bin/sh localhost/ultus-atomic:ci \
+            -c 'ls -1 /usr/lib/modules | sort -V | tail -1')
+          if [[ -z $kver ]]; then
+            echo "FAIL the loaded image has no /usr/lib/modules entry" >&2
+            exit 1
+          fi
+          initramfs=/usr/lib/modules/${kver}/initramfs.img
+          podman create --name probe-built localhost/ultus-atomic:ci
+          podman cp "probe-built:${initramfs}" "$RUNNER_TEMP/built.img"
+          podman rm probe-built
+          sudo podman create --name probe-loaded localhost/ultus-atomic:ci
+          sudo podman cp "probe-loaded:${initramfs}" "$RUNNER_TEMP/loaded.img"
+          sudo podman rm probe-loaded
+          for stage in built loaded; do
+            if [[ ! -s $RUNNER_TEMP/$stage.img ]]; then
+              echo "FAIL the ${stage} probe copied no initramfs" >&2
+              exit 1
+            fi
+            ls -l "$RUNNER_TEMP/$stage.img"
+            sha256sum "$RUNNER_TEMP/$stage.img"
+          done
+          sudo podman run --rm -v "$RUNNER_TEMP/loaded.img:/initramfs.img:ro" \
+            --entrypoint /bin/sh quay.io/centos-bootc/bootc-image-builder:latest \
+            -c 'lsinitrd --mod /initramfs.img >/dev/null 2>/tmp/e; echo "builder_lsinitrd_exit=$?"; tail -3 /tmp/e'
+          cmp "$RUNNER_TEMP/built.img" "$RUNNER_TEMP/loaded.img"
+
+      - name: Build disk
+        run: |
           sudo tests/vm/make-disk.sh localhost/ultus-atomic:ci "$GITHUB_WORKSPACE/output"
 
       - name: Boot smoke test
