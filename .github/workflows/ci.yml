@@ -231,8 +231,17 @@ jobs:
           # Print the freed size and the filesystem state so the run log records
           # the evidence for #173.
           if [ -d "$RUNNER_TEMP/rootfs" ]; then
-            bytes=$(du -sb "$RUNNER_TEMP/rootfs" 2>/dev/null | cut -f1) || bytes=unknown
-            rm -rf "$RUNNER_TEMP/rootfs"
+            # Use sudo for both the measurement and the removal because the
+            # exported tree may contain root-owned files the unprivileged
+            # runner cannot delete. sudo is already used in this job
+            # (sudo podman load -i .cache/image.tar), the tree is disposable,
+            # and a failure to remove it should warn and continue so `df`
+            # records the real state for the disk build step rather than
+            # failing the SBOM artifact gate.
+            bytes=$(sudo du -sb "$RUNNER_TEMP/rootfs" 2>/dev/null | cut -f1) || bytes=unknown
+            if ! sudo rm -rf "$RUNNER_TEMP/rootfs"; then
+              echo "::warning title=SBOM rootfs not removed::could not remove $RUNNER_TEMP/rootfs; the disk build may still see the space it holds"
+            fi
             echo "freed_rootfs_bytes=${bytes:-unknown}"
             df -h / || true
             df -i / || true
