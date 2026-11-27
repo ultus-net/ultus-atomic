@@ -32,6 +32,12 @@ runtime=${CONTAINER_RUNTIME:-podman}
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
 "$runtime" run --rm "$image" bootc container lint
+# Every image must run its own zstd. A 32-bit dependency can upgrade libzstd
+# alone, and the zstd CLI then refuses every call. dracut's lsinitrd uses zstd
+# to read the initramfs, so that mismatch broke the disk build (#173).
+zstd_version=$("$runtime" run --rm "$image" zstd --version) \
+  || { echo "FAIL zstd does not run in the image; the CLI and libzstd versions disagree" >&2; exit 1; }
+echo "ok   zstd runs in the image (${zstd_version})"
 # The desktop contract, expressed in terms any desktop satisfies: every unit the
 # image ships outside a package, and every unit its own preset enables, verifies;
 # every binding resolves; the greeter command and a session entry name

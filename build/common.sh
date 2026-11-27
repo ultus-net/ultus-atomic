@@ -82,3 +82,11 @@ for step in /usr/libexec/ultus-atomic/build.d/*.sh; do
   [[ -e $step ]] || continue
   bash "$step"
 done
+
+# The base pins zstd 1.5.7 and libzstd 1.5.7. A 32-bit package pulls
+# libzstd 1.6.0.i686 from updates. dnf5 then upgrades the 64-bit libzstd to
+# match, but the zstd CLI stays at 1.5.7. zstd's runtime check refuses that
+# pair, so every zstd call fails. dracut's lsinitrd decompresses the initramfs
+# with zstd, so the disk build reported a premature end of archive (#173).
+# Upgrade both together, after every package transaction.
+dnf5 upgrade -y zstd libzstd
