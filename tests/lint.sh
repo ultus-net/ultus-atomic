@@ -43,6 +43,7 @@ bash_scripts=(
   tests/test-agent-container.sh
   tests/test-lock-drift.sh
   tests/test-apt-mirror.sh
+  tests/test-disk-retry.sh
   tests/verify-image.sh
   tests/verify-headless.sh
   tests/verify-kernel-signature.sh
@@ -83,4 +84,4 @@ done
 "$runtime" run --rm -v "$repo_root:/mnt:ro" -w /mnt "$actionlint_image" \
   .github/workflows/ci.yml
 
-bash tests/test-static.sh && bash tests/test-agent-container.sh && bash tests/test-lock-drift.sh && bash tests/test-apt-mirror.sh
+bash tests/test-static.sh && bash tests/test-agent-container.sh && bash tests/test-lock-drift.sh && bash tests/test-apt-mirror.sh && bash tests/test-disk-retry.sh
