@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Path-filter the shared image job so docs-only PRs skip the expensive build; the job uses a job-level `if:` so a skipped job reports `skipped` (treated as success) and required checks do not deadlock. Consequence: a skipped `image` produces no artifact and `publish`/`verify`/`promote` cannot run for that commit. (#155)
+
 - Fail publish when NEVRAs differ from the recorded lock (#153). The publish job now measures the image's third-party NEVRAs, runs them through the shared `build/lock-filter.awk`, and compares the result exactly to `manifests/packages-common.lock`. Any difference fails the publish job and prints the unified diff; unreadable or empty measurements exit with code 2 so measurement failures do not look like drift.
 
 - Stop pinning development tooling and stop failing on lock drift (#171). `tests/vm/make-disk.sh` now runs `bootc-image-builder:latest` instead of a digest, because the builder shapes a disposable disk rather than the artifact, and the digest pin meant an upstream fix could not arrive without a repo commit; `BIB_IMAGE` still takes a digest to reproduce an old disk. `tests/verify-image.sh` prints a changed third-party set and a `WARN` line instead of failing the `image` job, because the lock is a provenance record and #167's remaining blocking cases held every open pull request; a broken measurement still exits 1, and #153 tracks adding an exact NEVRA equality check to the publish path, which runs no lock check today. The base image stays pinned by tag and digest, because it is the published artifact's identity.

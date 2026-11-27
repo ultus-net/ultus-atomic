@@ -51,6 +51,7 @@ jobs:
       nvidia: ${{ steps.filter.outputs.nvidia }}
       desktop: ${{ steps.desktop.outputs.desktop }}
       server: ${{ steps.server.outputs.server }}
+      image: ${{ steps.image.outputs.image }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -141,6 +142,34 @@ jobs:
           fi
           echo "server=$matched" >> "$GITHUB_OUTPUT"
 
+      - id: image
+        name: Path filter for the shared image
+        run: |
+          set -euo pipefail
+          event="${{ github.event_name }}"
+          # Exact filter used for the shared image gating:
+          # ^(Containerfile$|\.github/workflows/ci\.yml$|build/|overlay/|modules/|manifests/packages-(common|desktop)\.txt$|manifests/packages-common\.lock$|tests/verify-image\.sh$|tests/verify-kernel-signature\.sh$|tests/vm/|\.trivyignore$)
+          # A job-level conditional is used so skipped jobs conclude 'skipped'
+          # (treated as success by GitHub for required checks). See the PR for
+          # the docs/ci.md note and the workflow-vs-job difference.
+          regex='^(Containerfile$|\.github/workflows/ci\.yml$|build/|overlay/|modules/|manifests/packages-(common|desktop)\.txt$|manifests/packages-common\.lock$|tests/verify-image\.sh$|tests/verify-kernel-signature\.sh$|tests/vm/|\.trivyignore$)'
+          matched=false
+          if [[ "$event" == 'pull_request' ]]; then
+            if git diff --name-only "${{ github.event.pull_request.base.sha }}...HEAD" | grep -Eq "$regex"; then
+              matched=true
+            fi
+          elif [[ "$event" == 'push' ]]; then
+            before="${{ github.event.before }}"
+            if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
+              matched=true
+            elif git diff --name-only "$before...HEAD" | grep -Eq "$regex"; then
+              matched=true
+            fi
+          else
+            matched=true
+          fi
+          echo "image=$matched" >> "$GITHUB_OUTPUT"
+
   # Proves the signature policy mechanism with a fixture key on a throwaway
   # registry. No image artifact and no OIDC identity: the shipped keyless policy
   # stays deferred, see docs/known-gaps.md.
@@ -171,7 +200,16 @@ jobs:
   # write token and no OIDC identity.
   image:
     runs-on: ubuntu-24.04
-    needs: static
+    # This job is gated on the changes job's image output. A job-level `if:` is
+    # used so a skipped job reports 'skipped' (treated as success by GitHub),
+    # while a workflow-level paths: filter would leave the required check pending
+    # and block merges. Additionally, if the detector (changes) itself fails or
+    # is cancelled `needs.changes.result != 'success'`, rebuild the image so a
+    # detector failure cannot turn a required check into a skipped-success.
+    # See docs/ci.md for the explanation and the publish consequence: when
+    # image is skipped there is no artifact and publish/verify/promote cannot run.
+    needs: [static, changes]
+    if: needs.changes.result != 'success' || needs.changes.outputs.image == 'true'
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
