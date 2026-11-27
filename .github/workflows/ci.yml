@@ -230,8 +230,9 @@ jobs:
           # failed there with 'cpio: premature end of archive', and the tree
           # extracted here is a second copy of the rootfs that only the scan
           # read. Remove it before the disk build; df in that step measures the
-          # space this frees.
-          rm -rf "$RUNNER_TEMP/rootfs"
+          # space this frees. The image keeps directories mode 0555 for root
+          # (/etc/bluetooth), so the unprivileged runner cannot unlink inside.
+          sudo rm -rf "$RUNNER_TEMP/rootfs"
 
       - name: Upload SBOM
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
