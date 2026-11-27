@@ -438,16 +438,15 @@ else
 fi
 
 # The comparison is one helper so tests/test-lock-drift.sh can run it with no
-# image. Pin the call, the advisory message, the warn-only rebuild branch and
-# the branch that keeps a failed measurement fatal, so a later edit cannot
-# silently turn drift back into a failed job (#171).
+# image. Read the drift arm itself rather than one message: it must advise and
+# must not exit, so a later edit cannot turn drift back into a failed job under
+# different wording (#171).
+drift_arm=$(awk '/^  if \(\(compare_status == 1\)\); then$/ {inside=1} inside {print} inside && /^  elif / {exit}' "$repo_root/tests/verify-image.sh")
 if ! grep -qF 'build/compare-lock.sh' "$repo_root/tests/verify-image.sh" ||
-   ! grep -qF 'WARN the third-party lock set changed' "$repo_root/tests/verify-image.sh" ||
-   ! grep -qF 'elif ((compare_status != 0))' "$repo_root/tests/verify-image.sh" ||
-   ! grep -qF 'elif [[ -n $compare_detail ]]' "$repo_root/tests/verify-image.sh" ||
-   ! grep -qF 'FAIL the lock measurement failed; the generator or the image is broken' "$repo_root/tests/verify-image.sh" ||
-   grep -qF 'FAIL the third-party lock set changed' "$repo_root/tests/verify-image.sh"; then
-  echo "FAIL tests/verify-image.sh no longer calls build/compare-lock.sh, lost the advisory message, the warn-only branch or the failed-measurement branch, or fails the job on drift again" >&2
+   [[ $drift_arm != *'WARN the third-party lock set changed'* ]] ||
+   [[ $drift_arm == *'exit'* ]] ||
+   ! grep -qF 'FAIL the lock measurement failed; the generator or the image is broken' "$repo_root/tests/verify-image.sh"; then
+  echo "FAIL tests/verify-image.sh lost the lock comparison, the advise-only drift arm, or the fatal failed-measurement branch" >&2
   failures=$((failures + 1))
 elif ! grep -qF 'warning: the third-party lock records an older build' "$repo_root/build/compare-lock.sh" ||
    ! grep -qF 'pair_key' "$repo_root/build/compare-lock.sh"; then

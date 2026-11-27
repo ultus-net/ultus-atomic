@@ -434,7 +434,7 @@ else
     # here held every open pull request when a third-party package moved, so the
     # difference is reported and the publish path checks exact equality (#153).
     printf '%s\n' "$compare_detail"
-    echo "WARN the third-party lock set changed; publish checks exact equality (#153)"
+    echo "WARN the third-party lock set changed; #153 tracks the exact equality check on the publish path"
   elif ((compare_status != 0)); then
     echo "FAIL the lock measurement failed; the generator or the image is broken" >&2
     exit 1
