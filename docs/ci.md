@@ -17,7 +17,7 @@
 - The `ghcr` environment is the approval hook. Add required reviewers in the repository settings to gate publication.
 - The first push creates a private GHCR package. Set the package visibility to public in the package settings if anonymous pulls are wanted.
 
-The SBOM step scans a flattened rootfs with a digest-pinned syft container. syft needed more than 8 GB to scan the docker archive, so the step exports the image first, and it writes the report to a file rather than buffering it in memory.
+The SBOM step scans a flattened rootfs with a digest-pinned syft container. syft needed more than 8 GB to scan the docker archive, so the step exports the image first, and it writes the report to a file rather than buffering it in memory. It then removes the extracted tree, because the disk build that follows runs on the same filesystem: run 140311448179 failed there with `cpio: premature end of archive`, and `Build disk` now prints `df -h /` so the free space it starts with is in the log (#173).
 
 `just check` mirrors the static gate. `just build`, `just lint-image`, `just disk`, and `just boot` cover the rest.
 
