@@ -1084,6 +1084,51 @@ else
   echo "ok   ci.yml carries a path-filtered image-nvidia job with the expected verify flag and regex and a push guard"
 fi
 
+# Assert the shared image path filter and gating
+image_regex='^(Containerfile$|\.github/workflows/ci\.yml$|build/|overlay/|modules/|manifests/packages-(common|desktop)\.txt$|manifests/packages-common\.lock$|tests/verify-image\.sh$|tests/verify-kernel-signature\.sh$|tests/vm/|\.trivyignore$)'
+if ! grep -qF "if: needs.changes.result != 'success' || needs.changes.outputs.image == 'true'" "$workflow" || \
+   ! grep -qF "steps.image.outputs.image" "$workflow" || \
+   ! grep -qF "$image_regex" "$workflow"; then
+  echo "FAIL ci.yml does not carry the gated image job, its image output, or the exact image filter regex" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   ci.yml carries a path-filtered shared image job with expected output and regex"
+fi
+
+# Negative: docs-only paths must not match the image filter
+docs_only_list=$'docs/README.md\nCHANGELOG.md\ndocs/ci.md'
+if printf '%s\n' "$docs_only_list" | grep -Eq "$image_regex"; then
+  echo "FAIL the image filter unexpectedly matches docs-only paths" >&2
+  failures=$((failures + 1))
+else
+  echo "ok   the image filter does not match docs-only paths"
+fi
+
+# Positive: ensure every Containerfile COPY source is covered by the regex
+# Extract the first non-flag token after COPY (skip tokens beginning with --)
+mapfile -t copies < <(awk '/^COPY[[:space:]]+/ { for (i=2;i<=NF;i++) if ($i !~ /^--/) { print $i; break } }' Containerfile || true)
+if ((${#copies[@]} == 0)); then
+  echo "FAIL could not extract any COPY sources from Containerfile" >&2
+  failures=$((failures + 1))
+else
+  copy_fail=0
+  for src in "${copies[@]}"; do
+    case "$src" in
+      manifests) rep="manifests/packages-common.txt" ;;
+      *) rep="$src/somefile" ;;
+    esac
+    if ! printf '%s\n' "$rep" | grep -Eq "$image_regex"; then
+      echo "FAIL image filter does not match Containerfile COPY source (representative: $rep): $src" >&2
+      copy_fail=1
+    fi
+  done
+  if ((copy_fail == 0)); then
+    echo "ok   every Containerfile COPY source matches the image filter"
+  else
+    failures=$((failures + 1))
+  fi
+fi
+
 # A DNS or mirror blip on a hosted runner must not fail a release. Run
 # 43033654470 spent 67 minutes in the package install before apt reported
 # "Temporary failure resolving", and publish, verify and promote never ran.
