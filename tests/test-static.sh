@@ -438,22 +438,22 @@ else
 fi
 
 # The comparison is one helper so tests/test-lock-drift.sh can run it with no
-# image. Pin the call, the operator's two messages, the warn-only branch, and the
-# branch that keeps a failed measurement apart from a set change, so a later edit
-# cannot collapse them.
+# image. Read the drift arm itself: it must print the comparison detail and must
+# not exit, so a later edit cannot turn drift back into a failed job, whatever
+# the message says (#171).
+drift_arm=$(awk '/^  if \(\(compare_status == 1\)\); then$/ {inside=1} inside {print} inside && /^  elif / {exit}' "$repo_root/tests/verify-image.sh")
 if ! grep -qF 'build/compare-lock.sh' "$repo_root/tests/verify-image.sh" ||
-   ! grep -qF 'FAIL the third-party lock set changed: a package appeared, disappeared, or changed origin repository' "$repo_root/tests/verify-image.sh" ||
-   ! grep -qF 'elif ((compare_status != 0))' "$repo_root/tests/verify-image.sh" ||
-   ! grep -qF 'elif [[ -n $compare_detail ]]' "$repo_root/tests/verify-image.sh" ||
+   [[ $drift_arm != *'$compare_detail'* ]] ||
+   [[ $drift_arm == *'exit'* ]] ||
    ! grep -qF 'FAIL the lock measurement failed; the generator or the image is broken' "$repo_root/tests/verify-image.sh"; then
-  echo "FAIL tests/verify-image.sh no longer calls build/compare-lock.sh, or lost the set-change message, the warn-only branch, or the failed-measurement branch" >&2
+  echo "FAIL tests/verify-image.sh lost the lock comparison, the drift arm no longer reports its detail without exiting, or the failed-measurement branch is gone" >&2
   failures=$((failures + 1))
 elif ! grep -qF 'warning: the third-party lock records an older build' "$repo_root/build/compare-lock.sh" ||
    ! grep -qF 'pair_key' "$repo_root/build/compare-lock.sh"; then
   echo "FAIL build/compare-lock.sh lost the warn-only rebuild path or the package pair key" >&2
   failures=$((failures + 1))
 else
-  echo "ok   the lock comparison runs through build/compare-lock.sh, blocks a set change, and warns on a rebuild"
+  echo "ok   the lock comparison runs through build/compare-lock.sh, reports a set change without failing, and warns on a rebuild"
 fi
 
 # Secure Boot needs no per-machine enrollment only while the base keeps Fedora's

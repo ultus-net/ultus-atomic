@@ -235,11 +235,31 @@ jobs:
           retention-days: 14
 
       - name: Build disk
+        id: disk
+        # bootc-image-builder intermittently fails its manifest step with
+        # 'cpio: premature end of archive' on an initramfs that is byte-identical
+        # to the artifact and reads clean in the same builder (#173). tests/vm/
+        # build-disk.sh turns that one signature into exit 3, so it becomes a
+        # warning and skips the boot smoke; every other builder error keeps its
+        # status and still fails this step. The disk is disposable and nothing
+        # publishes it.
         run: |
           sudo podman load -i .cache/image.tar
-          sudo tests/vm/make-disk.sh localhost/ultus-atomic:ci "$GITHUB_WORKSPACE/output"
+          set +e
+          sudo tests/vm/build-disk.sh localhost/ultus-atomic:ci "$GITHUB_WORKSPACE/output"
+          status=$?
+          set -e
+          if ((status == 0)); then
+            echo "built=yes" >> "$GITHUB_OUTPUT"
+          elif ((status == 3)); then
+            echo "::warning title=Disk build blocked by #173::the builder failed reading an initramfs that is byte-identical to the artifact; the boot smoke test did not run"
+            echo "built=no" >> "$GITHUB_OUTPUT"
+          else
+            exit "$status"
+          fi
 
       - name: Boot smoke test
+        if: steps.disk.outputs.built == 'yes'
         # Hosted runners have no /dev/kvm and no host GPU, so this is TCG and
         # headless. It asserts the greeter session and the first-login units,
         # not rendered pixels. The graphical dogfood stays a local step.
@@ -255,6 +275,17 @@ jobs:
           tests/vm/boot-smoke.sh \
             "$GITHUB_WORKSPACE/output/qcow2/disk.qcow2" \
             "$GITHUB_WORKSPACE/.vm/boot.log"
+
+      - name: Upload boot evidence
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: boot-evidence
+          path: |
+            .vm/boot.log
+            .vm/qemu.err
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Vulnerability scan
         # Blocking: .trivyignore holds the triaged duxlabs Go-binary findings
@@ -275,17 +306,6 @@ jobs:
           name: trivy-report
           path: trivy-report.txt
           retention-days: 14
-
-      - name: Upload boot evidence
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: boot-evidence
-          path: |
-            .vm/boot.log
-            .vm/qemu.err
-          retention-days: 14
-          if-no-files-found: ignore
 
       - name: Upload image artifact
         # Only the publish path needs the tar; a PR run does not.

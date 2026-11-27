@@ -43,6 +43,7 @@ bash_scripts=(
   tests/test-agent-container.sh
   tests/test-lock-drift.sh
   tests/test-apt-mirror.sh
+  tests/test-disk-tolerance.sh
   tests/verify-image.sh
   tests/verify-headless.sh
   tests/verify-kernel-signature.sh
@@ -50,6 +51,7 @@ bash_scripts=(
   tests/vm/boot-smoke-server.sh
   tests/vm/lib/qemu.sh
   tests/vm/make-disk.sh
+  tests/vm/build-disk.sh
   modules/desktop/usr/libexec/ultus-atomic/build.d/50-desktop.sh
   modules/server/usr/libexec/ultus-atomic/build.d/50-server.sh
   modules/server/usr/libexec/ultus/ultus-data-prepare
@@ -83,4 +85,4 @@ done
 "$runtime" run --rm -v "$repo_root:/mnt:ro" -w /mnt "$actionlint_image" \
   .github/workflows/ci.yml
 
-bash tests/test-static.sh && bash tests/test-agent-container.sh && bash tests/test-lock-drift.sh && bash tests/test-apt-mirror.sh
+bash tests/test-static.sh && bash tests/test-agent-container.sh && bash tests/test-lock-drift.sh && bash tests/test-apt-mirror.sh && bash tests/test-disk-tolerance.sh
