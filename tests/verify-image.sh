@@ -401,8 +401,8 @@ fi
 # The lock records every package whose origin repository is not a Fedora
 # repository. The comparison reports provenance rather than gating it: the build
 # installs from live repositories, so a Fedora updates bump or a third-party
-# move must not hold a pull request, and exact NEVRA equality is the publish
-# path's check (#153, #171). Unpinnable git snapshots stay out of the lock; the
+# move must not hold a pull request, and exact NEVRA equality belongs on the
+# publish path (#153, #171). Unpinnable git snapshots stay out of the lock; the
 # generator names each one on stderr and the VM boot test covers a broken one.
 if (( no_lock == 1 )); then
   echo "ok   package lock comparison skipped (--no-package-lock)"
