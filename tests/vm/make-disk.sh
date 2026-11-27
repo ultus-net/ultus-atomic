@@ -93,9 +93,11 @@ if ((with_test_user)); then
   fi
 fi
 
-# Pin the builder by digest so a moving :latest cannot change the disk output.
-# Bump this deliberately; the digest is the manifest this repo was tested with.
-bib_image=${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder@sha256:a0ee98db5bfb8337e45efb92f0c5d1a19179c85ce80a3360abc628fd1a17cc5c}
+# Follow the moving tag while the project is in development: the builder is
+# input to a disposable disk, not part of the artifact, and a digest pin made an
+# upstream fix wait for a repo commit. Set BIB_IMAGE to a digest to reproduce an
+# old disk; the release path should pin one (#171).
+bib_image=${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder:latest}
 
 # Podman accepts the SELinux label only on an SELinux host; Ubuntu runners do
 # not have it, so pass it conditionally.
