@@ -521,6 +521,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check NEVRA equality against recorded lock
+        # Fail the publish if any NEVRA differs from the recorded lock. This
+        # runs before any tag push so a mismatch publishes nothing.
+        run: |
+          set -euo pipefail
+          # Load the built image into podman and measure its third-party packages.
+          podman load -i .cache/image.tar
+          # Generate the lock measurement into a temp file so compare-lock can read it.
+          if ! CONTAINER_RUNTIME=podman build/package-lock.sh localhost/ultus-atomic:ci >"$RUNNER_TEMP/measured.lock"; then
+            echo "FAIL the lock measurement failed; the generator or the image is broken" >&2
+            exit 2
+          fi
+          # Compare strictly against the recorded common lock; inspect status so
+          # we keep a measurement-failure distinct from a mismatch.
+          status=0
+          build/compare-lock.sh --strict manifests/packages-common.lock "$RUNNER_TEMP/measured.lock" || status=$?
+          if ((status == 0)); then
+            : # success, continue to push
+          elif ((status == 1)); then
+            echo "FAIL NEVRA mismatch: publish blocked by manifests/packages-common.lock" >&2
+            exit 1
+          else
+            echo "FAIL the strict lock comparison could not read an input (exit ${status})" >&2
+            exit "${status}"
+          fi
+
       - name: Push the commit tag
         id: push
         env:
