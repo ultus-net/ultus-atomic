@@ -153,7 +153,7 @@ The server boot test is not a gate on its own; CI runs it inside `image-server`.
 | `ULTUS_MOUNT:ok` | `/var/srv` is a mountpoint |
 | `ULTUS_SRV:ok` | `/srv` resolves to `/var/srv`, that path is on the data disk's filesystem, and the data disk is not the OS disk; the marker prints all four values |
 | `ULTUS_LINGER:yes` | `agents` lingers, so rootless Podman has a runtime directory |
-| `ULTUS_SUDO_KEEP:ok`, `ULTUS_SUDO_KEEPED:ok`, `ULTUS_SUDO_TICKET:ok` | The root ticket is refreshed every 60s; two refreshes land inside 125s, and at the end of each boot the count has grown since that check with no failed refresh, so no stage depends on how long an image pull takes |
+| `ULTUS_SUDO_KEEP:ok`, `ULTUS_SUDO_KEEPED:ok`, `ULTUS_SUDO_TICKET:ok` | The root ticket is refreshed at start and every 60s; two refreshes land inside 125s, and at the end of each boot the count must grow again within 130s with no failed refresh, so no stage depends on how long an image pull takes |
 | `ULTUS_OWNER:1000` | A container's write under `/var/srv/opencode/share` lands owned by `agents`, not root |
 | no `ULTUS_CANARY:*:readable` | A workload container cannot read `/home/<test account>`, `/root/.ssh`, the Podman socket or `/dev/kvm` |
 | `ULTUS_LISTEN:loopback` | Every listener is on loopback (`127.0.0.0/8` or `::1`) |
