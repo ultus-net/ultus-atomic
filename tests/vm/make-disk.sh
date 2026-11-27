@@ -96,7 +96,8 @@ fi
 # Follow the moving tag while the project is in development: the builder is
 # input to a disposable disk, not part of the artifact, and a digest pin made an
 # upstream fix wait for a repo commit. Set BIB_IMAGE to a digest to reproduce an
-# old disk; the release path should pin one (#171).
+# old disk. Nothing publishes a disk today; a published one would need a digest
+# pin (#171).
 bib_image=${BIB_IMAGE:-quay.io/centos-bootc/bootc-image-builder:latest}
 
 # Podman accepts the SELinux label only on an SELinux host; Ubuntu runners do
