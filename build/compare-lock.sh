@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
 # Compare the recorded package lock with a measured package list.
 #
-#   build/compare-lock.sh <recorded-lock> <measured-list>
+#   build/compare-lock.sh [--strict] <recorded-lock> <measured-list>
 #
-# Contract: exit 0 when both inputs name the same <package> TAB <origin repo>
-# pairs. A recorded package whose NEVRA moved inside its pair prints a warning
-# on stderr and still exits 0, because a third-party rebuild is not a change
-# this gate blocks. Exit 1 when a package appears, disappears or changes origin
-# repository, and print those pairs on stderr. Exit 2 when an input is
-# unreadable or has no data lines, so a failed measurement never looks like
-# drift. The measured list drops unpinnable NEVRAs the same way
-# build/package-lock.sh does.
+# Contract: default mode keeps historical behaviour: exit 0 when both inputs
+# name the same <package> TAB <origin repo> pairs, but a recorded package whose
+# NEVRA moved inside its pair prints a warning on stderr and still exits 0
+# (third-party rebuilds are advisory). Exit 1 when a package appears,
+# disappears or changes origin repository and print those pairs on stderr. Exit
+# 2 when an input is unreadable or has no data lines, so a failed measurement
+# never looks like drift. The measured list drops unpinnable NEVRAs the same
+# way build/package-lock.sh does. When invoked with --strict, require exact
+# NEVRA-level equality after lock-filter and sorting: exit 0 for exact match,
+# exit 1 with a diff on stderr for any difference, and exit 2 for unreadable or
+# empty inputs.
 
 set -euo pipefail
 
+# Optional strict mode: --strict
+strict=0
+if [[ ${1:-} == --strict ]]; then
+  strict=1
+  shift
+fi
+
 if (( $# != 2 )); then
-  echo "usage: build/compare-lock.sh <recorded-lock> <measured-list>" >&2
+  echo "usage: build/compare-lock.sh [--strict] <recorded-lock> <measured-list>" >&2
   exit 2
 fi
 
@@ -36,6 +46,28 @@ if [[ -z $recorded || -z $measured ]]; then
   exit 2
 fi
 
+# Strict mode: apply the same lock-filter to recorded and measured and require
+# exact NEVRA-level equality after sorting. The strict comparison filters both
+# sides through build/lock-filter.awk and sorts them, so it compares the sets
+# the generator can emit; a recorded line the filter drops is therefore
+# deliberately not compared. Exit 1 with a unified diff on stderr when they
+# differ.
+if (( strict == 1 )); then
+  recorded=$(awk -f "$script_dir/lock-filter.awk" <<<"$recorded")
+  measured=$(awk -f "$script_dir/lock-filter.awk" <<<"$measured")
+  recorded=$(LC_ALL=C sort -u <<<"$recorded")
+  measured=$(LC_ALL=C sort -u <<<"$measured")
+  if [[ $recorded == "$measured" ]]; then
+    exit 0
+  else
+    diff -u <(printf '%s\n' "$recorded") <(printf '%s\n' "$measured") >&2 || true
+    exit 1
+  fi
+fi
+
+# Historical default behaviour: measured is filtered the same way the generator
+# does, then compare by package/origin pair. A NEVRA that moved inside a pair
+# warns and still exits 0.
 measured=$(awk -f "$script_dir/lock-filter.awk" <<<"$measured")
 recorded=$(LC_ALL=C sort -u <<<"$recorded")
 measured=$(LC_ALL=C sort -u <<<"$measured")
@@ -71,6 +103,7 @@ if [[ $recorded_pairs != "$measured_pairs" ]]; then
 fi
 
 printf 'warning: the third-party lock records an older build of these packages; run just lock to refresh it\n' >&2
+
 diff -u <(printf '%s\n' "$recorded") <(printf '%s\n' "$measured") \
   | grep -E '^[-+][a-z0-9]' >&2 || true
 exit 0
