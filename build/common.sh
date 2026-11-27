@@ -83,10 +83,14 @@ for step in /usr/libexec/ultus-atomic/build.d/*.sh; do
   bash "$step"
 done
 
-# The base pins zstd 1.5.7 and libzstd 1.5.7. A 32-bit package pulls
-# libzstd 1.6.0.i686 from updates. dnf5 then upgrades the 64-bit libzstd to
-# match, but the zstd CLI stays at 1.5.7. zstd's runtime check refuses that
-# pair, so every zstd call fails. dracut's lsinitrd decompresses the initramfs
-# with zstd, so the disk build reported a premature end of archive (#173).
-# Upgrade both together, after every package transaction.
-dnf5 upgrade -y zstd libzstd
+# A 32-bit dependency can upgrade libzstd alone: dnf5 moves the 64-bit package
+# to match and leaves the zstd CLI behind. zstd's runtime check then refuses
+# every call, and dracut's lsinitrd reads the initramfs with zstd, so the disk
+# build reported a premature end of archive (#173). Repair only a mismatch,
+# after the module steps, and name only these two packages so nothing else
+# moves.
+zstd_pair=$(rpm -q --qf '%{NAME} %{VERSION}\n' zstd.x86_64 libzstd.x86_64 || true)
+if [[ $(awk '$1 == "zstd" { print $2 }' <<<"$zstd_pair") != \
+      "$(awk '$1 == "libzstd" { print $2 }' <<<"$zstd_pair")" ]]; then
+  dnf5 upgrade -y zstd libzstd
+fi
