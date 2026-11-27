@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the image's `zstd` and `libzstd` on one version (#173). A 32-bit Steam dependency upgraded `libzstd` alone, so the `zstd` CLI refused every call with `incorrect library version`. dracut's `lsinitrd` decompresses the initramfs through `zstd -d`, so the disk build read an empty stream and reported `cpio: premature end of archive`. `build/common.sh` now repairs a version mismatch after the module steps, and `tests/verify-image.sh` asserts the pair and runs `zstd --version`. The #173 tolerance in `tests/vm/build-disk.sh` stays until a CI run builds the disk and passes the boot smoke.
+
 - Path-filter the shared image job so docs-only PRs skip the expensive build; the job uses a job-level `if:` so a skipped job reports `skipped` (treated as success) and required checks do not deadlock. Consequence: a skipped `image` produces no artifact and `publish`/`verify`/`promote` cannot run for that commit. (#155)
 
 - Fail publish when NEVRAs differ from the recorded lock (#153). The publish job now measures the image's third-party NEVRAs, runs them through the shared `build/lock-filter.awk`, and compares the result exactly to `manifests/packages-common.lock`. Any difference fails the publish job and prints the unified diff; unreadable or empty measurements exit with code 2 so measurement failures do not look like drift.

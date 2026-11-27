@@ -82,3 +82,15 @@ for step in /usr/libexec/ultus-atomic/build.d/*.sh; do
   [[ -e $step ]] || continue
   bash "$step"
 done
+
+# A 32-bit dependency can upgrade libzstd alone: dnf5 moves the 64-bit package
+# to match and leaves the zstd CLI behind. zstd's runtime check then refuses
+# every call, and dracut's lsinitrd reads the initramfs with zstd, so the disk
+# build reported a premature end of archive (#173). Repair only a mismatch,
+# after the module steps, and name only these two packages so nothing else
+# moves.
+zstd_pair=$(rpm -q --qf '%{NAME} %{VERSION}\n' zstd.x86_64 libzstd.x86_64 || true)
+if [[ $(awk '$1 == "zstd" { print $2 }' <<<"$zstd_pair") != \
+      "$(awk '$1 == "libzstd" { print $2 }' <<<"$zstd_pair")" ]]; then
+  dnf5 upgrade -y zstd libzstd
+fi
